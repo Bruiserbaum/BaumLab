@@ -1,0 +1,14 @@
+scan:
+  default_ranges:
+    - "192.168.1.0/24"
+  auto_interval_minutes: 60
+
+unifi:
+  url: ""
+  username: "admin"
+  password: "changeme"
+  site: "default"
+  verify_ssl: false
+
+monitor:
+  default_interval_seconds: 60

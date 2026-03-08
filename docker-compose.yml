@@ -1,0 +1,38 @@
+version: "3.9"
+
+services:
+  api:
+    build: ./backend
+    container_name: baumlab-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data          # SQLite database + persistent state
+      - ./config:/app/config      # User config (credentials, scan ranges, etc.)
+    environment:
+      - DATABASE_URL=sqlite:///./data/baumlab.db
+      - CONFIG_PATH=/app/config/config.yaml
+    networks:
+      - baumlab
+    # HOST networking required for raw ICMP ping and ARP scanning
+    # Swap to the line below if you want ping/ARP to see your LAN:
+    # network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+
+  frontend:
+    build: ./frontend
+    container_name: baumlab-ui
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - api
+    networks:
+      - baumlab
+
+networks:
+  baumlab:
+    driver: bridge
