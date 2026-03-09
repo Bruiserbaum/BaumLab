@@ -9,9 +9,15 @@ export function AuthProvider({ children }) {
   })
 
   const login = useCallback(async (username, password) => {
-    const form = new URLSearchParams({ username, password })
-    const res = await fetch('/api/auth/login', { method: 'POST', body: form })
-    if (!res.ok) throw new Error('Invalid username or password')
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: username.trim(), password: password.trim() }),
+    })
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      throw new Error(data.detail || `Login failed (${res.status})`)
+    }
     const { access_token } = await res.json()
 
     const meRes = await fetch('/api/auth/me', { headers: { Authorization: `Bearer ${access_token}` } })

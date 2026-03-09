@@ -50,8 +50,9 @@ async def _run_monitor_checks():
 
 def _seed_admin():
     """Create the initial admin user from env vars if no users exist yet."""
-    username = os.getenv("ADMIN_USERNAME", "admin")
-    password = os.getenv("ADMIN_PASSWORD", "")
+    # .strip() guards against invisible trailing whitespace from Portainer / .env files
+    username = os.getenv("ADMIN_USERNAME", "admin").strip()
+    password = os.getenv("ADMIN_PASSWORD", "").strip()
     if not password:
         print("WARNING: ADMIN_PASSWORD not set — skipping admin seed")
         return
