@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from ..services.unifi import UniFiClient, UniFiConfig
+from ..services.unifi import UniFiClient
 from ..services.auth import get_current_user
 import os, yaml
 
@@ -15,41 +15,48 @@ def _get_client() -> UniFiClient:
         uf = raw.get("unifi", {})
         if not uf.get("url"):
             raise HTTPException(status_code=503, detail="UniFi not configured")
-        cfg = UniFiConfig(
+        return UniFiClient(
             url=uf["url"],
             username=uf.get("username", ""),
             password=uf.get("password", ""),
             site=uf.get("site", "default"),
             verify_ssl=uf.get("verify_ssl", False),
         )
-        return UniFiClient(cfg)
     except FileNotFoundError:
         raise HTTPException(status_code=503, detail="config.yaml not found")
 
 
 @router.get("/clients")
 async def get_clients():
-    async with _get_client() as client:
-        await client.login()
+    client = _get_client()
+    try:
         return await client.get_clients()
+    finally:
+        await client.close()
 
 
 @router.get("/devices")
 async def get_devices():
-    async with _get_client() as client:
-        await client.login()
+    client = _get_client()
+    try:
         return await client.get_devices()
+    finally:
+        await client.close()
 
 
 @router.get("/networks")
 async def get_networks():
-    async with _get_client() as client:
-        await client.login()
+    client = _get_client()
+    try:
         return await client.get_networks()
+    finally:
+        await client.close()
 
 
 @router.get("/devices/{mac}/ports")
 async def get_port_stats(mac: str):
-    async with _get_client() as client:
-        await client.login()
+    client = _get_client()
+    try:
         return await client.get_port_stats(mac)
+    finally:
+        await client.close()
