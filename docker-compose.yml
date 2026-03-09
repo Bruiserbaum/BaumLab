@@ -6,7 +6,7 @@ services:
     container_name: baumlab-api
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "${API_PORT:-8100}:8000"
     volumes:
       - ./data:/app/data          # SQLite database + persistent state
       - ./config:/app/config      # User config (credentials, scan ranges, etc.)
@@ -27,7 +27,7 @@ services:
     container_name: baumlab-ui
     restart: unless-stopped
     ports:
-      - "3000:80"
+      - "${UI_PORT:-3100}:80"
     depends_on:
       - api
     networks:
