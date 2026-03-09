@@ -131,3 +131,8 @@ input:focus, select:focus { border-color: var(--accent); }
   padding: 16px;
   margin-bottom: 12px;
 }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.3; }
+}

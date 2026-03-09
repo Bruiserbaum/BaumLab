@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useApi } from '../auth'
 
 const API = '/api'
@@ -8,8 +8,11 @@ export default function DevicesPage() {
   const [devices, setDevices] = useState([])
   const [cidr, setCidr] = useState('192.168.1.0/24')
   const [scanning, setScanning] = useState(false)
+  const [scanLog, setScanLog] = useState([])
   const [editId, setEditId] = useState(null)
   const [editData, setEditData] = useState({})
+  const logRef = useRef(null)
+  const pollRef = useRef(null)
 
   async function loadDevices() {
     const r = await api(`${API}/devices/`)
@@ -18,12 +21,31 @@ export default function DevicesPage() {
 
   useEffect(() => { loadDevices() }, [])
 
+  // Keep log scrolled to bottom
+  useEffect(() => {
+    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
+  }, [scanLog])
+
+  async function pollStatus() {
+    const r = await api(`${API}/scan/status`)
+    if (!r.ok) return
+    const data = await r.json()
+    setScanLog(data.log || [])
+    if (!data.running) {
+      clearInterval(pollRef.current)
+      setScanning(false)
+      await loadDevices()
+    }
+  }
+
   async function startScan() {
     setScanning(true)
+    setScanLog([])
     await api(`${API}/scan/network?cidr=${encodeURIComponent(cidr)}`, { method: 'POST' })
-    // Poll until devices stabilise
-    setTimeout(async () => { await loadDevices(); setScanning(false) }, 5000)
+    pollRef.current = setInterval(pollStatus, 2000)
   }
+
+  useEffect(() => () => clearInterval(pollRef.current), [])
 
   async function saveEdit(id) {
     await api(`${API}/devices/${id}`, {
@@ -132,6 +154,43 @@ export default function DevicesPage() {
           ))}
         </tbody>
       </table>
+
+      {(scanning || scanLog.length > 0) && (
+        <div style={{
+          marginTop: 20, background: 'var(--bg2)', border: '1px solid var(--border)',
+          borderRadius: 8, overflow: 'hidden',
+        }}>
+          <div style={{
+            padding: '8px 14px', borderBottom: '1px solid var(--border)',
+            display: 'flex', alignItems: 'center', gap: 10,
+            fontSize: 12, color: 'var(--text-muted)', fontWeight: 600,
+          }}>
+            {scanning && (
+              <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
+                background: 'var(--accent)', animation: 'pulse 1s infinite' }} />
+            )}
+            SCAN LOG
+            {scanning && <span style={{ fontWeight: 400 }}>— scanning {cidr}…</span>}
+          </div>
+          <div ref={logRef} style={{
+            fontFamily: 'monospace', fontSize: 12, padding: '10px 14px',
+            maxHeight: 180, overflowY: 'auto', lineHeight: 1.7,
+            color: 'var(--text)',
+          }}>
+            {scanLog.length === 0 && scanning && (
+              <span style={{ color: 'var(--text-muted)' }}>Waiting for nmap to start…</span>
+            )}
+            {scanLog.map((line, i) => (
+              <div key={i} style={{
+                color: line.includes('ERROR') ? 'var(--red)'
+                     : line.includes('New device') ? 'var(--green)'
+                     : line.includes('Done') ? 'var(--green)'
+                     : 'var(--text)',
+              }}>{line}</div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
