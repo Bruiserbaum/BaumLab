@@ -18,9 +18,8 @@ def scan_network(cidr: str) -> list[dict]:
     """
     nm = nmap.PortScanner()
     # -sn = ping scan (host discovery only, no port scan)
-    # -O  = OS detection (needs root)
-    # --osscan-guess = best-guess even with weak fingerprint
-    nm.scan(hosts=cidr, arguments="-sn -O --osscan-guess")
+    # -O requires an active port scan type and cannot be combined with -sn
+    nm.scan(hosts=cidr, arguments="-sn")
 
     devices = []
     for host in nm.all_hosts():
