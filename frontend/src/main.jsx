@@ -7,6 +7,7 @@ import DevicesPage from './pages/DevicesPage'
 import MonitorsPage from './pages/MonitorsPage'
 import NetworkMapPage from './pages/NetworkMapPage'
 import UsersPage from './pages/UsersPage'
+import SettingsPage from './pages/SettingsPage'
 import './styles.css'
 
 function App() {
@@ -23,6 +24,7 @@ function App() {
           <NavLink to="/devices">Devices</NavLink>
           <NavLink to="/monitors">Monitors</NavLink>
           <NavLink to="/users">Users</NavLink>
+          {isAdmin && <NavLink to="/settings">Settings</NavLink>}
           <div style={{ marginTop: 'auto', padding: '12px 16px', borderTop: '1px solid var(--border)' }}>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>
               {user?.username}
@@ -39,6 +41,7 @@ function App() {
             <Route path="/devices" element={<DevicesPage />} />
             <Route path="/monitors" element={<MonitorsPage />} />
             <Route path="/users" element={<UsersPage />} />
+            <Route path="/settings" element={<SettingsPage />} />
           </Routes>
         </main>
       </div>

@@ -1,29 +1,23 @@
 from fastapi import APIRouter, Depends, HTTPException
 from ..services.unifi import UniFiClient
 from ..services.auth import get_current_user
-import os, yaml
+from ..services.config_service import read_config, decrypt
 
 router = APIRouter(prefix="/api/unifi", tags=["unifi"], dependencies=[Depends(get_current_user)])
 
-CONFIG_PATH = os.getenv("CONFIG_PATH", "/app/config/config.yaml")
-
 
 def _get_client() -> UniFiClient:
-    try:
-        with open(CONFIG_PATH) as f:
-            raw = yaml.safe_load(f)
-        uf = raw.get("unifi", {})
-        if not uf.get("url"):
-            raise HTTPException(status_code=503, detail="UniFi not configured")
-        return UniFiClient(
-            url=uf["url"],
-            username=uf.get("username", ""),
-            password=uf.get("password", ""),
-            site=uf.get("site", "default"),
-            verify_ssl=uf.get("verify_ssl", False),
-        )
-    except FileNotFoundError:
-        raise HTTPException(status_code=503, detail="config.yaml not found")
+    cfg = read_config()
+    uf = cfg.get("unifi", {})
+    if not uf.get("url"):
+        raise HTTPException(status_code=503, detail="UniFi not configured")
+    return UniFiClient(
+        url=uf["url"],
+        username=uf.get("username", ""),
+        password=decrypt(uf.get("password", "")),
+        site=uf.get("site", "default"),
+        verify_ssl=uf.get("verify_ssl", False),
+    )
 
 
 @router.get("/clients")

@@ -11,7 +11,9 @@ from .models.monitor import MonitorTarget, MonitorResult
 from .models.user import User
 from .services.monitor import run_check
 from .services.auth import hash_password
-from .routers import devices, monitors, scan, unifi, auth, users
+from .routers import devices, monitors, scan, unifi, auth, users, settings
+from .services.config_service import read_config
+from .routers.scan import _upsert_devices
 
 scheduler = AsyncIOScheduler()
 
@@ -73,7 +75,16 @@ def _seed_admin():
 async def lifespan(app: FastAPI):
     create_db_and_tables()
     _seed_admin()
-    scheduler.add_job(_run_monitor_checks, "interval", seconds=30)
+    scheduler.add_job(_run_monitor_checks, "interval", seconds=30, id="monitor_checks")
+    # Auto-scan if configured
+    sc = read_config().get("scan", {})
+    if sc.get("auto_scan") and sc.get("default_cidr"):
+        interval_min = int(sc.get("auto_scan_interval_minutes", 60))
+        scheduler.add_job(
+            _upsert_devices, "interval", minutes=interval_min,
+            args=[sc["default_cidr"]], id="auto_scan",
+        )
+        print(f"Auto-scan enabled: {sc['default_cidr']} every {interval_min} min")
     scheduler.start()
     yield
     scheduler.shutdown()
@@ -94,6 +105,7 @@ app.include_router(devices.router)
 app.include_router(monitors.router)
 app.include_router(scan.router)
 app.include_router(unifi.router)
+app.include_router(settings.router)
 
 
 @app.get("/api/health")

@@ -19,7 +19,12 @@ export default function DevicesPage() {
     setDevices(await r.json())
   }
 
-  useEffect(() => { loadDevices() }, [])
+  useEffect(() => {
+    loadDevices()
+    api('/api/settings/').then(r => r.ok ? r.json() : null).then(data => {
+      if (data?.scan?.default_cidr) setCidr(data.scan.default_cidr)
+    }).catch(() => {})
+  }, [])
 
   // Keep log scrolled to bottom
   useEffect(() => {
