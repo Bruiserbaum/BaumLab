@@ -4,8 +4,9 @@ from datetime import datetime
 from ..models.device import Device
 from ..services.scanner import scan_network, scan_ports, guess_device_type
 from ..database import get_session
+from ..services.auth import get_current_user
 
-router = APIRouter(prefix="/api/scan", tags=["scan"])
+router = APIRouter(prefix="/api/scan", tags=["scan"], dependencies=[Depends(get_current_user)])
 
 
 def _upsert_devices(cidr: str, session: Session):

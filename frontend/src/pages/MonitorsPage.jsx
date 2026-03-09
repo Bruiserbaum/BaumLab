@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { useApi } from '../auth'
 
 const API = '/api'
 const PROTOCOLS = ['icmp', 'tcp', 'http', 'https']
@@ -6,12 +7,13 @@ const PROTOCOLS = ['icmp', 'tcp', 'http', 'https']
 const blank = { name: '', host: '', port: null, protocol: 'icmp', interval_seconds: 60, enabled: true }
 
 export default function MonitorsPage() {
+  const api = useApi()
   const [targets, setTargets] = useState([])
   const [form, setForm] = useState(blank)
   const [showForm, setShowForm] = useState(false)
 
   async function load() {
-    const r = await fetch(`${API}/monitors/`)
+    const r = await api(`${API}/monitors/`)
     setTargets(await r.json())
   }
 
@@ -19,7 +21,7 @@ export default function MonitorsPage() {
 
   async function submit(e) {
     e.preventDefault()
-    await fetch(`${API}/monitors/`, {
+    await api(`${API}/monitors/`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...form, port: form.port ? +form.port : null }),
@@ -31,7 +33,7 @@ export default function MonitorsPage() {
 
   async function remove(id) {
     if (!confirm('Delete this monitor?')) return
-    await fetch(`${API}/monitors/${id}`, { method: 'DELETE' })
+    await api(`${API}/monitors/${id}`, { method: 'DELETE' })
     await load()
   }
 

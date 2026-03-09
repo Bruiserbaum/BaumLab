@@ -1,3 +1,4 @@
+import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,8 +8,10 @@ from datetime import datetime
 
 from .database import create_db_and_tables, engine
 from .models.monitor import MonitorTarget, MonitorResult
+from .models.user import User
 from .services.monitor import run_check
-from .routers import devices, monitors, scan, unifi
+from .services.auth import hash_password
+from .routers import devices, monitors, scan, unifi, auth, users
 
 scheduler = AsyncIOScheduler()
 
@@ -45,9 +48,30 @@ async def _run_monitor_checks():
         session.commit()
 
 
+def _seed_admin():
+    """Create the initial admin user from env vars if no users exist yet."""
+    username = os.getenv("ADMIN_USERNAME", "admin")
+    password = os.getenv("ADMIN_PASSWORD", "")
+    if not password:
+        print("WARNING: ADMIN_PASSWORD not set — skipping admin seed")
+        return
+    with Session(engine) as session:
+        if session.exec(select(User)).first():
+            return  # Users already exist, don't overwrite
+        admin = User(
+            username=username,
+            hashed_password=hash_password(password),
+            is_admin=True,
+        )
+        session.add(admin)
+        session.commit()
+        print(f"Admin user '{username}' created")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     create_db_and_tables()
+    _seed_admin()
     scheduler.add_job(_run_monitor_checks, "interval", seconds=30)
     scheduler.start()
     yield
@@ -63,6 +87,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth.router)
+app.include_router(users.router)
 app.include_router(devices.router)
 app.include_router(monitors.router)
 app.include_router(scan.router)

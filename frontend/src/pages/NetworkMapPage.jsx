@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react'
+import { useApi } from '../auth'
 import ReactFlow, {
   Background, Controls, MiniMap,
   useNodesState, useEdgesState, addEdge,
@@ -55,12 +56,13 @@ function layoutNodes(devices) {
 }
 
 export default function NetworkMapPage() {
+  const api = useApi()
   const [nodes, setNodes, onNodesChange] = useNodesState([])
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
   const [selected, setSelected] = useState(null)
 
   async function load() {
-    const r = await fetch(`${API}/devices/`)
+    const r = await api(`${API}/devices/`)
     const devices = await r.json()
     setNodes(layoutNodes(devices))
     setEdges([]) // Topology edges would come from UniFi data

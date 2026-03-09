@@ -2,8 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 from ..models.monitor import MonitorTarget, MonitorTargetCreate, MonitorResult
 from ..database import get_session
+from ..services.auth import get_current_user
 
-router = APIRouter(prefix="/api/monitors", tags=["monitors"])
+router = APIRouter(prefix="/api/monitors", tags=["monitors"], dependencies=[Depends(get_current_user)])
 
 
 @router.get("/", response_model=list[MonitorTarget])

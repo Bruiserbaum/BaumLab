@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react'
+import { useApi } from '../auth'
 
 const API = '/api'
 
 export default function DevicesPage() {
+  const api = useApi()
   const [devices, setDevices] = useState([])
   const [cidr, setCidr] = useState('192.168.1.0/24')
   const [scanning, setScanning] = useState(false)
@@ -10,7 +12,7 @@ export default function DevicesPage() {
   const [editData, setEditData] = useState({})
 
   async function loadDevices() {
-    const r = await fetch(`${API}/devices/`)
+    const r = await api(`${API}/devices/`)
     setDevices(await r.json())
   }
 
@@ -18,13 +20,13 @@ export default function DevicesPage() {
 
   async function startScan() {
     setScanning(true)
-    await fetch(`${API}/scan/network?cidr=${encodeURIComponent(cidr)}`, { method: 'POST' })
+    await api(`${API}/scan/network?cidr=${encodeURIComponent(cidr)}`, { method: 'POST' })
     // Poll until devices stabilise
     setTimeout(async () => { await loadDevices(); setScanning(false) }, 5000)
   }
 
   async function saveEdit(id) {
-    await fetch(`${API}/devices/${id}`, {
+    await api(`${API}/devices/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(editData),
@@ -35,12 +37,12 @@ export default function DevicesPage() {
 
   async function deleteDevice(id) {
     if (!confirm('Delete this device?')) return
-    await fetch(`${API}/devices/${id}`, { method: 'DELETE' })
+    await api(`${API}/devices/${id}`, { method: 'DELETE' })
     await loadDevices()
   }
 
   async function portScan(id) {
-    await fetch(`${API}/scan/ports/${id}`, { method: 'POST' })
+    await api(`${API}/scan/ports/${id}`, { method: 'POST' })
     await loadDevices()
   }
 

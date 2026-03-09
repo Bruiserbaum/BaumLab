@@ -1,8 +1,9 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from ..services.unifi import UniFiClient, UniFiConfig
+from ..services.auth import get_current_user
 import os, yaml
 
-router = APIRouter(prefix="/api/unifi", tags=["unifi"])
+router = APIRouter(prefix="/api/unifi", tags=["unifi"], dependencies=[Depends(get_current_user)])
 
 CONFIG_PATH = os.getenv("CONFIG_PATH", "/app/config/config.yaml")
 

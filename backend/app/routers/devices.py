@@ -2,8 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 from ..models.device import Device, DeviceUpdate
 from ..database import get_session
+from ..services.auth import get_current_user
 
-router = APIRouter(prefix="/api/devices", tags=["devices"])
+router = APIRouter(prefix="/api/devices", tags=["devices"], dependencies=[Depends(get_current_user)])
 
 
 @router.get("/", response_model=list[Device])
