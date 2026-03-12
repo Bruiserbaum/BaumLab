@@ -98,7 +98,7 @@ class OpenVasService:
     def _session(self):
         sock = _connect(self.host, self.port, self.socket_path)
         try:
-            _recv_xml(sock)   # discard initial <get_version_response>
+            _cmd(sock, "<get_version/>")   # request version (required handshake)
             resp = _cmd(
                 sock,
                 f"<authenticate><credentials>"
@@ -121,7 +121,7 @@ class OpenVasService:
         try:
             sock = _connect(self.host, self.port, self.socket_path)
             try:
-                ver = _recv_xml(sock)
+                ver = _cmd(sock, "<get_version/>")
                 return {"connected": True, "version": ver.findtext("version", "unknown")}
             finally:
                 sock.close()
