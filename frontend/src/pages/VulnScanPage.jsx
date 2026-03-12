@@ -118,7 +118,7 @@ export default function VulnScanPage() {
     if (results[taskId]) return
     setLoadingRes(taskId)
     const r = await api(`${API}/tasks/${taskId}/results`)
-    if (r.ok) setResults(prev => ({ ...prev, [taskId]: await r.json() }))
+    if (r.ok) { const data = await r.json(); setResults(prev => ({ ...prev, [taskId]: data })) }
     setLoadingRes(null)
   }
 
