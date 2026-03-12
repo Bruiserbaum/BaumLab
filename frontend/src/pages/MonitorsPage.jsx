@@ -8,9 +8,10 @@ const blank = { name: '', host: '', port: null, protocol: 'icmp', interval_secon
 
 export default function MonitorsPage() {
   const api = useApi()
-  const [targets, setTargets] = useState([])
-  const [form, setForm] = useState(blank)
+  const [targets, setTargets]   = useState([])
+  const [form, setForm]         = useState(blank)
   const [showForm, setShowForm] = useState(false)
+  const [editId, setEditId]     = useState(null)  // null = add mode, number = edit mode
 
   async function load() {
     const r = await api(`${API}/monitors/`)
@@ -19,15 +20,42 @@ export default function MonitorsPage() {
 
   useEffect(() => { load() }, [])
 
+  function openAdd() {
+    setEditId(null)
+    setForm(blank)
+    setShowForm(true)
+  }
+
+  function openEdit(t) {
+    setEditId(t.id)
+    setForm({ name: t.name, host: t.host, port: t.port, protocol: t.protocol,
+              interval_seconds: t.interval_seconds, enabled: t.enabled })
+    setShowForm(true)
+  }
+
+  function cancelForm() {
+    setShowForm(false)
+    setEditId(null)
+    setForm(blank)
+  }
+
   async function submit(e) {
     e.preventDefault()
-    await api(`${API}/monitors/`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...form, port: form.port ? +form.port : null }),
-    })
-    setForm(blank)
-    setShowForm(false)
+    const body = { ...form, port: form.port ? +form.port : null }
+    if (editId != null) {
+      await api(`${API}/monitors/${editId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+    } else {
+      await api(`${API}/monitors/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+    }
+    cancelForm()
     await load()
   }
 
@@ -41,12 +69,15 @@ export default function MonitorsPage() {
     <div>
       <h1>Monitors</h1>
       <div className="toolbar">
-        <button onClick={() => setShowForm(s => !s)}>{showForm ? 'Cancel' : '+ Add Monitor'}</button>
+        <button onClick={showForm && editId == null ? cancelForm : openAdd}>
+          {showForm && editId == null ? 'Cancel' : '+ Add Monitor'}
+        </button>
         <button className="secondary" onClick={load}>Refresh</button>
       </div>
 
       {showForm && (
-        <form className="card" onSubmit={submit} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <form className="card" onSubmit={submit}
+          style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
           <label>
             <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Name</div>
             <input required value={form.name} onChange={e => setForm(x => ({ ...x, name: e.target.value }))} />
@@ -71,7 +102,18 @@ export default function MonitorsPage() {
             <input type="number" value={form.interval_seconds} style={{ width: 80 }}
               onChange={e => setForm(x => ({ ...x, interval_seconds: +e.target.value }))} />
           </label>
-          <button type="submit">Add</button>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Enabled</div>
+            <select value={form.enabled ? 'true' : 'false'}
+              onChange={e => setForm(x => ({ ...x, enabled: e.target.value === 'true' }))}>
+              <option value="true">Active</option>
+              <option value="false">Paused</option>
+            </select>
+          </label>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button type="submit">{editId != null ? 'Save' : 'Add'}</button>
+            <button type="button" className="secondary" onClick={cancelForm}>Cancel</button>
+          </div>
         </form>
       )}
 
@@ -89,7 +131,7 @@ export default function MonitorsPage() {
         </thead>
         <tbody>
           {targets.map(t => (
-            <tr key={t.id}>
+            <tr key={t.id} style={editId === t.id ? { background: 'var(--bg2)' } : {}}>
               <td>{t.name}</td>
               <td style={{ fontFamily: 'monospace' }}>{t.host}</td>
               <td><span className="badge badge-gray">{t.protocol}</span></td>
@@ -100,7 +142,8 @@ export default function MonitorsPage() {
                   {t.enabled ? 'active' : 'paused'}
                 </span>
               </td>
-              <td>
+              <td style={{ display: 'flex', gap: 6 }}>
+                <button className="secondary" onClick={() => openEdit(t)}>✎ Edit</button>
                 <button className="secondary" style={{ color: 'var(--red)' }} onClick={() => remove(t.id)}>✕</button>
               </td>
             </tr>
