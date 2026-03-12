@@ -10,13 +10,16 @@ class User(SQLModel, table=True):
     hashed_password: str
     is_admin: bool = Field(default=False)
     created_at: datetime = Field(default_factory=datetime.utcnow)
+    totp_secret: Optional[str] = Field(default=None)
+    totp_enabled: bool = Field(default=False)
 
 
 class UserPublic(BaseModel):
-    """Safe user representation — never exposes hashed_password."""
+    """Safe user representation — never exposes hashed_password or totp_secret."""
     id: int
     username: str
     is_admin: bool
+    totp_enabled: bool
     created_at: datetime
 
     model_config = {"from_attributes": True}

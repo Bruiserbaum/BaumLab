@@ -35,6 +35,27 @@ def create_access_token(user_id: int) -> str:
     return jwt.encode({"sub": str(user_id), "exp": expire}, SECRET_KEY, algorithm=ALGORITHM)
 
 
+def create_mfa_token(user_id: int) -> str:
+    """Short-lived (5 min) token issued after password check when MFA is required."""
+    expire = datetime.utcnow() + timedelta(minutes=5)
+    return jwt.encode({"mfa_pending": str(user_id), "exp": expire}, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def verify_mfa_token(token: str) -> int:
+    """Validate a pending-MFA token and return the user_id."""
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id = payload.get("mfa_pending")
+        if user_id is None:
+            raise JWTError("not an mfa token")
+        return int(user_id)
+    except (JWTError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired MFA token",
+        )
+
+
 # ── FastAPI dependencies ───────────────────────────────────────────────────────
 def get_current_user(
     token: str = Depends(oauth2_scheme),

@@ -8,6 +8,16 @@ export function AuthProvider({ children }) {
     try { return JSON.parse(localStorage.getItem('bl_user')) } catch { return null }
   })
 
+  async function _finalize(access_token) {
+    const meRes = await fetch('/api/auth/me', { headers: { Authorization: `Bearer ${access_token}` } })
+    const me = await meRes.json()
+    localStorage.setItem('bl_token', access_token)
+    localStorage.setItem('bl_user', JSON.stringify(me))
+    setToken(access_token)
+    setUser(me)
+  }
+
+  // Returns { mfa_required: true, mfa_token } if TOTP is needed, otherwise resolves fully.
   const login = useCallback(async (username, password) => {
     const res = await fetch('/api/auth/login', {
       method: 'POST',
@@ -18,15 +28,27 @@ export function AuthProvider({ children }) {
       const data = await res.json().catch(() => ({}))
       throw new Error(data.detail || `Login failed (${res.status})`)
     }
+    const data = await res.json()
+    if (data.mfa_required) {
+      return { mfa_required: true, mfa_token: data.mfa_token }
+    }
+    await _finalize(data.access_token)
+    return { mfa_required: false }
+  }, [])
+
+  // Called from the TOTP step of the login page.
+  const completeMfaLogin = useCallback(async (mfa_token, code) => {
+    const res = await fetch('/api/auth/login/mfa', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mfa_token, code: code.trim() }),
+    })
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      throw new Error(data.detail || `Authentication failed (${res.status})`)
+    }
     const { access_token } = await res.json()
-
-    const meRes = await fetch('/api/auth/me', { headers: { Authorization: `Bearer ${access_token}` } })
-    const me = await meRes.json()
-
-    localStorage.setItem('bl_token', access_token)
-    localStorage.setItem('bl_user', JSON.stringify(me))
-    setToken(access_token)
-    setUser(me)
+    await _finalize(access_token)
   }, [])
 
   const logout = useCallback(() => {
@@ -37,7 +59,7 @@ export function AuthProvider({ children }) {
   }, [])
 
   return (
-    <AuthContext.Provider value={{ token, user, login, logout, isAdmin: user?.is_admin ?? false }}>
+    <AuthContext.Provider value={{ token, user, login, completeMfaLogin, logout, isAdmin: user?.is_admin ?? false }}>
       {children}
     </AuthContext.Provider>
   )

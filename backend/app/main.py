@@ -6,7 +6,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlmodel import Session, select
 from datetime import datetime
 
-from .database import create_db_and_tables, engine
+from .database import create_db_and_tables, migrate_db, engine
 from .models.monitor import MonitorTarget, MonitorResult
 from .models.user import User
 from .services.monitor import run_check
@@ -74,6 +74,7 @@ def _seed_admin():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     create_db_and_tables()
+    migrate_db()
     _seed_admin()
     scheduler.add_job(_run_monitor_checks, "interval", seconds=30, id="monitor_checks")
     # Auto-scan if configured

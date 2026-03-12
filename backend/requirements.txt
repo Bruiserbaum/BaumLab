@@ -12,3 +12,5 @@ python-jose[cryptography]==3.3.0  # JWT tokens
 python-nmap==0.7.1        # nmap wrapper for device discovery
 mac-vendor-lookup==0.1.12 # MAC OUI → vendor name
 icmplib==3.0.4            # Pure-Python ICMP ping (no subprocess)
+pyotp==2.9.0              # TOTP / HOTP for Google Authenticator MFA
+qrcode==7.4.2             # QR code generation (SVG, no Pillow needed)
