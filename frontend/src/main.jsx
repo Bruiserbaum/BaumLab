@@ -9,10 +9,14 @@ import NetworkMapPage from './pages/NetworkMapPage'
 import UsersPage from './pages/UsersPage'
 import SettingsPage from './pages/SettingsPage'
 import ExternalScanPage from './pages/ExternalScanPage'
+import StatusPage from './pages/StatusPage'
 import './styles.css'
 
 function App() {
   const { token, user, logout, isAdmin } = useAuth()
+
+  // Public route — no login required
+  if (window.location.pathname === '/status') return <StatusPage />
 
   if (!token) return <LoginPage />
 
