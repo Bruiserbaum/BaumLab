@@ -11,6 +11,7 @@ import SettingsPage from './pages/SettingsPage'
 import ExternalScanPage from './pages/ExternalScanPage'
 import StatusPage from './pages/StatusPage'
 import TargetScanPage from './pages/TargetScanPage'
+import UniFiPage from './pages/UniFiPage'
 import './styles.css'
 
 function App() {
@@ -31,6 +32,7 @@ function App() {
           <NavLink to="/monitors">Monitors</NavLink>
           <NavLink to="/external-scan">External Scan</NavLink>
           <NavLink to="/target-scan">Target Scan</NavLink>
+          <NavLink to="/unifi">UniFi</NavLink>
           <NavLink to="/users">Users</NavLink>
           {isAdmin && <NavLink to="/settings">Settings</NavLink>}
           <div style={{ marginTop: 'auto', padding: '12px 16px', borderTop: '1px solid var(--border)' }}>
@@ -51,6 +53,7 @@ function App() {
             <Route path="/users" element={<UsersPage />} />
             <Route path="/external-scan" element={<ExternalScanPage />} />
             <Route path="/target-scan" element={<TargetScanPage />} />
+            <Route path="/unifi" element={<UniFiPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Routes>
         </main>
