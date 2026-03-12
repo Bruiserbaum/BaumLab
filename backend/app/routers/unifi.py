@@ -17,6 +17,8 @@ def _get_client() -> UniFiClient:
         password=decrypt(uf.get("password", "")),
         site=uf.get("site", "default"),
         verify_ssl=uf.get("verify_ssl", False),
+        api_key=decrypt(uf.get("api_key", "")),
+        controller_type=uf.get("controller_type", "classic"),
     )
 
 

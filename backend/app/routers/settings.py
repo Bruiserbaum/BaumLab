@@ -14,8 +14,10 @@ class UniFiIn(BaseModel):
     url: str = ""
     username: str = ""
     password: Optional[str] = None   # None or MASK = keep existing
+    api_key: Optional[str] = None    # None or MASK = keep existing
     site: str = "default"
     verify_ssl: bool = False
+    controller_type: str = "classic"  # "classic" | "udm"
 
 
 class ScanIn(BaseModel):
@@ -39,8 +41,10 @@ def get_settings():
             "url": uf.get("url", ""),
             "username": uf.get("username", ""),
             "password": MASK if uf.get("password") else "",
+            "api_key": MASK if uf.get("api_key") else "",
             "site": uf.get("site", "default"),
             "verify_ssl": uf.get("verify_ssl", False),
+            "controller_type": uf.get("controller_type", "classic"),
             "configured": bool(uf.get("url")),
         },
         "scan": {
@@ -62,9 +66,12 @@ def save_settings(payload: SettingsIn):
         uf["username"] = u.username
         uf["site"] = u.site
         uf["verify_ssl"] = u.verify_ssl
-        # Only re-encrypt if a real new password was submitted
+        uf["controller_type"] = u.controller_type
+        # Only re-encrypt if a real new value was submitted
         if u.password and u.password != MASK:
             uf["password"] = encrypt(u.password)
+        if u.api_key and u.api_key != MASK:
+            uf["api_key"] = encrypt(u.api_key)
         cfg["unifi"] = uf
 
     if payload.scan is not None:

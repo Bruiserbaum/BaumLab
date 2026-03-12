@@ -3,7 +3,7 @@ import { useAuth, useApi } from '../auth'
 
 const MASK = '••••••••'
 
-const blankUnifi = { url: '', username: '', password: '', site: 'default', verify_ssl: false }
+const blankUnifi = { url: '', username: '', password: '', api_key: '', site: 'default', verify_ssl: false, controller_type: 'classic' }
 const blankScan  = { default_cidr: '192.168.1.0/24', auto_scan: false, auto_scan_interval_minutes: 60 }
 
 export default function SettingsPage() {
@@ -72,15 +72,27 @@ export default function SettingsPage() {
             Credentials are stored encrypted (AES-256 Fernet) using your SECRET_KEY.
           </p>
 
-          <Field label="Controller URL" hint="e.g. https://192.168.1.1 or https://unifi.ui.com">
+          <Field label="Controller Type">
+            <select value={unifi.controller_type} onChange={e => setUnifi(u => ({ ...u, controller_type: e.target.value }))}>
+              <option value="classic">Classic (Network Application)</option>
+              <option value="udm">Dream Machine (UDM / UDM-Pro)</option>
+            </select>
+          </Field>
+          <Field label="Controller URL" hint="e.g. https://192.168.1.1 or https://192.168.1.1:8443">
             <input value={unifi.url} onChange={e => setUnifi(u => ({ ...u, url: e.target.value }))}
               placeholder="https://192.168.1.1" />
           </Field>
-          <Field label="Username">
+          <Field label="API Key" hint="Recommended — bypasses MFA. Leave blank to use username/password">
+            <input type="password" value={unifi.api_key}
+              placeholder={unifi.api_key === MASK ? 'Saved — enter new to change' : ''}
+              onChange={e => setUnifi(u => ({ ...u, api_key: e.target.value }))}
+              autoComplete="new-password" />
+          </Field>
+          <Field label="Username" hint="Only needed if not using API key">
             <input value={unifi.username} onChange={e => setUnifi(u => ({ ...u, username: e.target.value }))}
               autoComplete="off" />
           </Field>
-          <Field label="Password" hint="Leave blank to keep existing">
+          <Field label="Password" hint="Only needed if not using API key">
             <input type="password" value={unifi.password}
               placeholder={unifi.password === MASK ? 'Saved — enter new to change' : ''}
               onChange={e => setUnifi(u => ({ ...u, password: e.target.value }))}
