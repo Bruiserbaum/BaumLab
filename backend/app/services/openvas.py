@@ -1,27 +1,70 @@
 """
 OpenVAS / Greenbone Vulnerability Management (GVM) integration.
 
-Uses python-gvm to communicate with gvmd via Unix socket (recommended for Docker)
-or TLS (for remote/networked GVM instances).
+Communicates directly with gvmd via GMP (Greenbone Management Protocol)
+over TLS (TCP) or Unix domain socket — no python-gvm dependency, so there
+are no GMP-version-mismatch errors regardless of which gvmd version is running.
 
 Powered by Greenbone Community Edition — https://www.greenbone.net/
 OpenVAS is an open-source full-featured vulnerability scanner licensed under GPLv2.
 """
+import html
+import socket
+import ssl
+import xml.etree.ElementTree as ET
 from contextlib import contextmanager
 from typing import Optional
 
-from gvm.connections import TLSConnection, UnixSocketConnection
-from gvm.errors import GvmError
-from gvm.protocols.gmp import Gmp
-from gvm.transforms import EtreeCheckCommandTransform
-
-# Standard port list IDs (built into every OpenVAS installation)
+# Standard port list and scanner IDs present in every OpenVAS installation
 PORT_LIST_ALL_TCP_NMAP_UDP = "730ef368-57e2-11e1-a90f-406186ea4fc5"
-PORT_LIST_ALL_TCP          = "33d0cd82-57c6-11e1-8ed1-406186ea4fc5"
+OPENVAS_SCANNER_ID         = "08b69003-5fc2-4037-a479-93b440211c73"
 
-# Standard scanner ID (OpenVAS Default Scanner)
-OPENVAS_SCANNER_ID = "08b69003-5fc2-4037-a479-93b440211c73"
 
+# ── Low-level GMP transport ───────────────────────────────────────────────────
+
+def _connect(host: Optional[str], port: int, socket_path: str) -> socket.socket:
+    if host:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        raw = socket.create_connection((host, port), timeout=30)
+        return ctx.wrap_socket(raw, server_hostname=host)
+    else:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(30)
+        sock.connect(socket_path)
+        return sock
+
+
+def _recv_xml(sock: socket.socket) -> ET.Element:
+    """Read one complete GMP XML response from the socket."""
+    data = b""
+    while True:
+        try:
+            chunk = sock.recv(65536)
+        except (socket.timeout, OSError):
+            break
+        if not chunk:
+            break
+        data += chunk
+        try:
+            return ET.fromstring(data.decode("utf-8"))
+        except ET.ParseError:
+            pass
+    return ET.fromstring(data.decode("utf-8"))
+
+
+def _cmd(sock: socket.socket, xml: str) -> ET.Element:
+    sock.sendall(xml.encode("utf-8"))
+    return _recv_xml(sock)
+
+
+def _x(s: str) -> str:
+    """Escape a string for embedding in XML text or attribute values."""
+    return html.escape(str(s))
+
+
+# ── Service class ─────────────────────────────────────────────────────────────
 
 class OpenVasService:
     def __init__(
@@ -40,62 +83,66 @@ class OpenVasService:
 
     @contextmanager
     def _session(self):
-        if self.host:
-            conn = TLSConnection(hostname=self.host, port=self.port)
-        else:
-            conn = UnixSocketConnection(path=self.socket_path)
-        with Gmp(conn, transform=EtreeCheckCommandTransform()) as gmp:
-            gmp.authenticate(self.username, self.password)
-            yield gmp
+        sock = _connect(self.host, self.port, self.socket_path)
+        try:
+            _recv_xml(sock)   # discard initial <get_version_response>
+            resp = _cmd(
+                sock,
+                f"<authenticate><credentials>"
+                f"<username>{_x(self.username)}</username>"
+                f"<password>{_x(self.password)}</password>"
+                f"</credentials></authenticate>",
+            )
+            if resp.get("status") != "200":
+                raise RuntimeError(f"GMP auth failed: {resp.get('status_text', resp.get('status'))}")
+            yield sock
+        finally:
+            try:
+                sock.close()
+            except Exception:
+                pass
 
     # ── Health ────────────────────────────────────────────────────────────────
 
     def check_connection(self) -> dict:
         try:
-            with self._session() as gmp:
-                ver = gmp.get_version()
-                return {
-                    "connected": True,
-                    "version": ver.findtext("version") or "unknown",
-                }
+            sock = _connect(self.host, self.port, self.socket_path)
+            try:
+                ver = _recv_xml(sock)
+                return {"connected": True, "version": ver.findtext("version", "unknown")}
+            finally:
+                sock.close()
         except Exception as e:
             return {"connected": False, "error": str(e)}
 
     # ── Scan configurations ───────────────────────────────────────────────────
 
     def get_scan_configs(self) -> list[dict]:
-        with self._session() as gmp:
-            resp = gmp.get_scan_configs()
+        with self._session() as sock:
+            resp = _cmd(sock, "<get_scan_configs/>")
             return [
-                {
-                    "id":   c.get("id"),
-                    "name": c.findtext("name", ""),
-                }
+                {"id": c.get("id"), "name": c.findtext("name", "")}
                 for c in resp.findall("config")
-                if c.findtext("name") and c.get("type") != "1"  # skip policy type
+                if c.findtext("name") and c.get("type") != "1"
             ]
 
     # ── Tasks ─────────────────────────────────────────────────────────────────
 
     def get_tasks(self) -> list[dict]:
-        with self._session() as gmp:
-            resp  = gmp.get_tasks()
+        with self._session() as sock:
+            resp = _cmd(sock, "<get_tasks/>")
             tasks = []
             for t in resp.findall("task"):
-                last_report = t.find("last_report/report")
-                report_id   = last_report.get("id") if last_report is not None else None
-                result_count = last_report.findtext("result_count/full") if last_report is not None else None
-                # severity counts from last report
-                high   = last_report.findtext("severity/full") if last_report is not None else None
+                lr = t.find("last_report/report")
+                report_id = lr.get("id") if lr is not None else None
                 counts = {}
-                if last_report is not None:
+                if lr is not None:
                     for level in ("high", "medium", "low", "log"):
-                        val = last_report.findtext(f"result_count/{level}")
+                        val = lr.findtext(f"result_count/{level}")
                         if val:
                             counts[level] = int(val)
-                progress_txt = t.findtext("progress", "-1")
                 try:
-                    progress = int(progress_txt)
+                    progress = int(t.findtext("progress", "-1"))
                 except (ValueError, TypeError):
                     progress = -1
                 tasks.append({
@@ -111,16 +158,14 @@ class OpenVasService:
             return tasks
 
     def get_task(self, task_id: str) -> Optional[dict]:
-        with self._session() as gmp:
-            resp = gmp.get_task(task_id=task_id)
-            t    = resp.find("task")
+        with self._session() as sock:
+            resp = _cmd(sock, f'<get_tasks task_id="{_x(task_id)}"/>')
+            t = resp.find("task")
             if t is None:
                 return None
-            last_report = t.find("last_report/report")
-            report_id   = last_report.get("id") if last_report is not None else None
-            progress_txt = t.findtext("progress", "-1")
+            lr = t.find("last_report/report")
             try:
-                progress = int(progress_txt)
+                progress = int(t.findtext("progress", "-1"))
             except (ValueError, TypeError):
                 progress = -1
             return {
@@ -128,7 +173,7 @@ class OpenVasService:
                 "name":      t.findtext("name", ""),
                 "status":    t.findtext("status", ""),
                 "progress":  progress,
-                "report_id": report_id,
+                "report_id": lr.get("id") if lr is not None else None,
                 "target":    t.findtext("target/name", ""),
             }
 
@@ -136,59 +181,59 @@ class OpenVasService:
         self, host_target: str, scan_config_id: str, task_name: Optional[str] = None
     ) -> dict:
         name = task_name or f"BaumLab — {host_target}"
-        with self._session() as gmp:
-            # Create target
-            t_resp = gmp.create_target(
-                name=name,
-                hosts=[host_target],
-                port_list_id=PORT_LIST_ALL_TCP_NMAP_UDP,
+        with self._session() as sock:
+            t_resp = _cmd(
+                sock,
+                f"<create_target>"
+                f"<name>{_x(name)}</name>"
+                f"<hosts>{_x(host_target)}</hosts>"
+                f'<port_list id="{PORT_LIST_ALL_TCP_NMAP_UDP}"/>'
+                f"</create_target>",
             )
             target_id = t_resp.get("id")
 
-            # Create task
-            tk_resp = gmp.create_task(
-                name=name,
-                config_id=scan_config_id,
-                target_id=target_id,
-                scanner_id=OPENVAS_SCANNER_ID,
+            tk_resp = _cmd(
+                sock,
+                f"<create_task>"
+                f"<name>{_x(name)}</name>"
+                f'<config id="{_x(scan_config_id)}"/>'
+                f'<target id="{_x(target_id)}"/>'
+                f'<scanner id="{OPENVAS_SCANNER_ID}"/>'
+                f"</create_task>",
             )
             task_id = tk_resp.get("id")
 
-            # Start it
-            gmp.start_task(task_id)
+            _cmd(sock, f'<start_task task_id="{_x(task_id)}"/>')
+
         return {"task_id": task_id, "target_id": target_id, "name": name}
 
     def delete_task(self, task_id: str, ultimate: bool = False):
-        with self._session() as gmp:
-            gmp.delete_task(task_id=task_id, ultimate=ultimate)
+        with self._session() as sock:
+            _cmd(sock, f'<delete_task task_id="{_x(task_id)}" ultimate="{"1" if ultimate else "0"}"/>')
 
     # ── Results ───────────────────────────────────────────────────────────────
 
     def get_results(self, report_id: str) -> list[dict]:
-        with self._session() as gmp:
-            resp = gmp.get_report(
-                report_id=report_id,
-                filter_string="levels=hmlgd rows=500 min_qod=30 sort-reverse=severity",
-                details=True,
-                ignore_pagination=True,
+        with self._session() as sock:
+            resp = _cmd(
+                sock,
+                f'<get_reports report_id="{_x(report_id)}" details="1"'
+                f' ignore_pagination="1"'
+                f' filter="levels=hmlgd rows=500 min_qod=30 sort-reverse=severity"/>',
             )
             findings = []
             for r in resp.findall(".//result"):
                 host_el  = r.find("host")
-                host_ip  = ""
-                hostname = ""
-                if host_el is not None:
-                    host_ip  = (host_el.text or "").strip()
-                    hostname = (host_el.findtext("hostname") or "").strip()
-
-                severity_txt = r.findtext("severity", "0")
+                host_ip  = (host_el.text or "").strip() if host_el is not None else ""
+                hostname = (host_el.findtext("hostname") or "").strip() if host_el is not None else ""
                 try:
-                    severity = float(severity_txt)
+                    severity = float(r.findtext("severity", "0"))
                 except (ValueError, TypeError):
                     severity = 0.0
-
-                cves = [ref.get("id", "") for ref in r.findall(".//ref[@type='cve']") if ref.get("id")]
-
+                cves = [
+                    ref.get("id", "") for ref in r.findall(".//ref[@type='cve']")
+                    if ref.get("id")
+                ]
                 findings.append({
                     "id":          r.get("id", ""),
                     "name":        r.findtext("name", "Unknown"),
@@ -201,6 +246,5 @@ class OpenVasService:
                     "solution":    (r.findtext("solution") or "").strip()[:500],
                     "cves":        cves,
                 })
-
             findings.sort(key=lambda x: x["severity"], reverse=True)
             return findings
