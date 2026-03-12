@@ -24,11 +24,18 @@ OPENVAS_SCANNER_ID         = "08b69003-5fc2-4037-a479-93b440211c73"
 
 def _connect(host: Optional[str], port: int, socket_path: str) -> socket.socket:
     if host:
-        ctx = ssl.create_default_context()
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
+        # gvmd uses GnuTLS with self-signed certs; lower security level for compatibility
+        try:
+            ctx.set_ciphers("DEFAULT:@SECLEVEL=0")
+        except ssl.SSLError:
+            pass
         raw = socket.create_connection((host, port), timeout=30)
-        return ctx.wrap_socket(raw, server_hostname=host)
+        sock = ctx.wrap_socket(raw)   # no SNI — gvmd doesn't need it
+        sock.settimeout(30)
+        return sock
     else:
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         sock.settimeout(30)
@@ -42,6 +49,10 @@ def _recv_xml(sock: socket.socket) -> ET.Element:
     while True:
         try:
             chunk = sock.recv(65536)
+        except ssl.SSLError as e:
+            if data:
+                break
+            raise ConnectionError(f"TLS read error: {e}") from e
         except (socket.timeout, OSError):
             break
         if not chunk:
@@ -51,6 +62,8 @@ def _recv_xml(sock: socket.socket) -> ET.Element:
             return ET.fromstring(data.decode("utf-8"))
         except ET.ParseError:
             pass
+    if not data:
+        raise ConnectionError("gvmd closed connection without sending data")
     return ET.fromstring(data.decode("utf-8"))
 
 
