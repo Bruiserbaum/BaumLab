@@ -56,6 +56,67 @@ def scan_ports(ip: str, port_range: str = "22,80,443,8080,8443,5000,9000") -> li
     return open_ports
 
 
+def advanced_scan(ip: str, ports: str) -> dict:
+    """
+    Deep scan a single host: service/version detection + NSE scripts for
+    SSL/TLS ciphers, certificate info, SMB negotiation, HTTP headers, and
+    service banners.  Returns a structured dict ready for the API response.
+    """
+    nm = nmap.PortScanner()
+    scripts = ",".join([
+        "banner",
+        "ssl-cert",
+        "ssl-enum-ciphers",
+        "http-title",
+        "http-server-header",
+        "smb-security-mode",
+        "smb2-security-mode",
+    ])
+    nm.scan(hosts=ip, ports=ports, arguments=f"-sV -T4 --script={scripts}")
+
+    if ip not in nm.all_hosts():
+        return {"target": ip, "hostname": "", "os_guess": None, "ports": [], "error": "Host did not respond"}
+
+    host    = nm[ip]
+    hostname = host.hostname() or ""
+    os_guess = None
+    if host.get("osmatch"):
+        os_guess = host["osmatch"][0]["name"]
+
+    open_ports = []
+    for proto in ("tcp", "udp"):
+        if proto not in host:
+            continue
+        for port, info in sorted(host[proto].items()):
+            if info["state"] != "open":
+                continue
+            scripts_out = info.get("script", {})
+            open_ports.append({
+                "port":         port,
+                "protocol":     proto,
+                "state":        info["state"],
+                "service":      info.get("name", ""),
+                "product":      info.get("product", ""),
+                "version":      info.get("version", ""),
+                "extra":        info.get("extrainfo", ""),
+                "banner":       scripts_out.get("banner", ""),
+                "ssl_cert":     scripts_out.get("ssl-cert", ""),
+                "tls_ciphers":  scripts_out.get("ssl-enum-ciphers", ""),
+                "http_title":   scripts_out.get("http-title", ""),
+                "http_server":  scripts_out.get("http-server-header", ""),
+                "smb_security": scripts_out.get("smb-security-mode", ""),
+                "smb2_security":scripts_out.get("smb2-security-mode", ""),
+            })
+
+    return {
+        "target":   ip,
+        "hostname": hostname,
+        "os_guess": os_guess,
+        "ports":    open_ports,
+        "error":    None,
+    }
+
+
 def guess_device_type(vendor: Optional[str], open_ports: list[int], os_guess: Optional[str]) -> Optional[str]:
     """Heuristic device classification."""
     v = (vendor or "").lower()

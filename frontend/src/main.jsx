@@ -10,6 +10,7 @@ import UsersPage from './pages/UsersPage'
 import SettingsPage from './pages/SettingsPage'
 import ExternalScanPage from './pages/ExternalScanPage'
 import StatusPage from './pages/StatusPage'
+import TargetScanPage from './pages/TargetScanPage'
 import './styles.css'
 
 function App() {
@@ -29,6 +30,7 @@ function App() {
           <NavLink to="/devices">Devices</NavLink>
           <NavLink to="/monitors">Monitors</NavLink>
           <NavLink to="/external-scan">External Scan</NavLink>
+          <NavLink to="/target-scan">Target Scan</NavLink>
           <NavLink to="/users">Users</NavLink>
           {isAdmin && <NavLink to="/settings">Settings</NavLink>}
           <div style={{ marginTop: 'auto', padding: '12px 16px', borderTop: '1px solid var(--border)' }}>
@@ -48,6 +50,7 @@ function App() {
             <Route path="/monitors" element={<MonitorsPage />} />
             <Route path="/users" element={<UsersPage />} />
             <Route path="/external-scan" element={<ExternalScanPage />} />
+            <Route path="/target-scan" element={<TargetScanPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Routes>
         </main>
