@@ -132,11 +132,22 @@ class OpenVasService:
 
     def get_scan_configs(self) -> list[dict]:
         with self._session() as sock:
-            resp = _cmd(sock, "<get_scan_configs/>")
+            # GMP 22.x uses <get_configs usage_type="scan"/>
+            # (<get_scan_configs/> was added in GMP 23+)
+            resp = _cmd(sock, '<get_configs usage_type="scan"/>')
+            configs = resp.findall("config")
+            # Fallback: if empty, try without usage_type filter
+            if not configs:
+                resp = _cmd(sock, "<get_configs/>")
+                configs = resp.findall("config")
             return [
                 {"id": c.get("id"), "name": c.findtext("name", "")}
-                for c in resp.findall("config")
-                if c.findtext("name") and c.get("type") != "1"
+                for c in configs
+                if c.findtext("name")
+                # exclude OSP scanner type (type=1); type=0 is OpenVAS
+                and c.get("type") != "1"
+                # exclude audit policies
+                and (c.findtext("usage_type") or "scan") == "scan"
             ]
 
     # ── Tasks ─────────────────────────────────────────────────────────────────
