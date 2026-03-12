@@ -11,7 +11,7 @@ from .models.monitor import MonitorTarget, MonitorResult
 from .models.user import User
 from .services.monitor import run_check
 from .services.auth import hash_password
-from .routers import devices, monitors, scan, unifi, auth, users, settings, external_scan, status, advanced_scan
+from .routers import devices, monitors, scan, unifi, auth, users, settings, external_scan, status, advanced_scan, vuln_scan
 from .services.config_service import read_config
 from .routers.scan import _upsert_devices
 
@@ -110,6 +110,7 @@ app.include_router(settings.router)
 app.include_router(external_scan.router)
 app.include_router(status.router)
 app.include_router(advanced_scan.router)
+app.include_router(vuln_scan.router)
 
 
 @app.get("/api/health")

@@ -14,3 +14,4 @@ mac-vendor-lookup==0.1.12 # MAC OUI → vendor name
 icmplib==3.0.4            # Pure-Python ICMP ping (no subprocess)
 pyotp==2.9.0              # TOTP / HOTP for Google Authenticator MFA
 qrcode==7.4.2             # QR code generation (SVG, no Pillow needed)
+python-gvm==24.8.0        # Greenbone Vulnerability Manager (OpenVAS) GMP client

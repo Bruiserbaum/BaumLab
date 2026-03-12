@@ -26,16 +26,26 @@ class ScanIn(BaseModel):
     auto_scan_interval_minutes: int = 60
 
 
+class OpenVasIn(BaseModel):
+    socket_path: str = "/var/run/gvmd/gvmd.sock"
+    host: str = ""           # leave blank to use socket
+    port: int = 9390
+    username: str = "admin"
+    password: Optional[str] = None  # None or MASK = keep existing
+
+
 class SettingsIn(BaseModel):
     unifi: Optional[UniFiIn] = None
     scan: Optional[ScanIn] = None
+    openvas: Optional[OpenVasIn] = None
 
 
 @router.get("/", dependencies=[Depends(require_admin)])
 def get_settings():
     cfg = read_config()
-    uf = cfg.get("unifi", {})
-    sc = cfg.get("scan", {})
+    uf  = cfg.get("unifi", {})
+    sc  = cfg.get("scan", {})
+    ov  = cfg.get("openvas", {})
     return {
         "unifi": {
             "url": uf.get("url", ""),
@@ -51,6 +61,13 @@ def get_settings():
             "default_cidr": sc.get("default_cidr", "192.168.1.0/24"),
             "auto_scan": sc.get("auto_scan", False),
             "auto_scan_interval_minutes": sc.get("auto_scan_interval_minutes", 60),
+        },
+        "openvas": {
+            "socket_path": ov.get("socket_path", "/var/run/gvmd/gvmd.sock"),
+            "host": ov.get("host", ""),
+            "port": ov.get("port", 9390),
+            "username": ov.get("username", "admin"),
+            "password": MASK if ov.get("password") else "",
         },
     }
 
@@ -81,6 +98,17 @@ def save_settings(payload: SettingsIn):
             "auto_scan": s.auto_scan,
             "auto_scan_interval_minutes": s.auto_scan_interval_minutes,
         }
+
+    if payload.openvas is not None:
+        ov = cfg.get("openvas", {})
+        o = payload.openvas
+        ov["socket_path"] = o.socket_path
+        ov["host"]        = o.host
+        ov["port"]        = o.port
+        ov["username"]    = o.username
+        if o.password and o.password != MASK:
+            ov["password"] = encrypt(o.password)
+        cfg["openvas"] = ov
 
     write_config(cfg)
     return {"status": "saved"}

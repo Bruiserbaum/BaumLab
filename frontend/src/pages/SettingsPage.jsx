@@ -3,25 +3,30 @@ import { useAuth, useApi } from '../auth'
 
 const MASK = '••••••••'
 
-const blankUnifi = { url: '', username: '', password: '', api_key: '', site: 'default', verify_ssl: false, controller_type: 'classic' }
-const blankScan  = { default_cidr: '192.168.1.0/24', auto_scan: false, auto_scan_interval_minutes: 60 }
+const blankUnifi   = { url: '', username: '', password: '', api_key: '', site: 'default', verify_ssl: false, controller_type: 'classic' }
+const blankScan    = { default_cidr: '192.168.1.0/24', auto_scan: false, auto_scan_interval_minutes: 60 }
+const blankOpenVas = { socket_path: '/var/run/gvmd/gvmd.sock', host: '', port: 9390, username: 'admin', password: '' }
 
 export default function SettingsPage() {
   const { isAdmin } = useAuth()
   const api = useApi()
-  const [unifi, setUnifi]     = useState(blankUnifi)
-  const [scan, setScan]       = useState(blankScan)
-  const [saved, setSaved]     = useState(false)
-  const [error, setError]     = useState('')
-  const [loading, setLoading] = useState(true)
+  const [unifi, setUnifi]       = useState(blankUnifi)
+  const [scan, setScan]         = useState(blankScan)
+  const [openvas, setOpenVas]   = useState(blankOpenVas)
+  const [saved, setSaved]       = useState(false)
+  const [error, setError]       = useState('')
+  const [loading, setLoading]   = useState(true)
   const [testResult, setTestResult] = useState(null)
-  const [testing, setTesting] = useState(false)
+  const [testing, setTesting]   = useState(false)
+  const [ovTest, setOvTest]     = useState(null)
+  const [ovTesting, setOvTesting] = useState(false)
 
   useEffect(() => {
     if (!isAdmin) return
     api('/api/settings/').then(r => r.json()).then(data => {
-      if (data.unifi) setUnifi({ ...blankUnifi, ...data.unifi })
-      if (data.scan)  setScan({ ...blankScan,  ...data.scan })
+      if (data.unifi)   setUnifi({ ...blankUnifi, ...data.unifi })
+      if (data.scan)    setScan({ ...blankScan, ...data.scan })
+      if (data.openvas) setOpenVas({ ...blankOpenVas, ...data.openvas })
       setLoading(false)
     })
   }, [isAdmin])
@@ -32,15 +37,26 @@ export default function SettingsPage() {
     const r = await api('/api/settings/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ unifi, scan }),
+      body: JSON.stringify({ unifi, scan, openvas }),
     })
     if (!r.ok) { setError((await r.json()).detail || 'Save failed'); return }
     setSaved(true)
     setTimeout(() => setSaved(false), 3000)
-    // Re-load to get masked password back
+    // Re-load to get masked passwords back
     const fresh = await (await api('/api/settings/')).json()
-    if (fresh.unifi) setUnifi({ ...blankUnifi, ...fresh.unifi })
-    if (fresh.scan)  setScan({ ...blankScan,   ...fresh.scan })
+    if (fresh.unifi)   setUnifi({ ...blankUnifi, ...fresh.unifi })
+    if (fresh.scan)    setScan({ ...blankScan, ...fresh.scan })
+    if (fresh.openvas) setOpenVas({ ...blankOpenVas, ...fresh.openvas })
+  }
+
+  async function testOpenVas() {
+    setOvTesting(true); setOvTest(null)
+    const r = await api('/api/vuln-scan/health')
+    const data = await r.json().catch(() => ({}))
+    setOvTest(data.connected
+      ? { ok: true,  msg: `Connected — GVM ${data.version}` }
+      : { ok: false, msg: data.error || 'Could not connect' })
+    setOvTesting(false)
   }
 
   async function testUnifi() {
@@ -114,6 +130,55 @@ export default function SettingsPage() {
             {testResult && (
               <span style={{ fontSize: 12, color: testResult.ok ? 'var(--green)' : 'var(--red)' }}>
                 {testResult.ok ? '✓' : '✗'} {testResult.msg}
+              </span>
+            )}
+          </div>
+        </section>
+
+        {/* ── OpenVAS ────────────────────────────────────────────── */}
+        <section className="card">
+          <h2 style={{ marginTop: 0, marginBottom: 4, fontSize: 15 }}>OpenVAS / Greenbone</h2>
+          <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--text-muted)' }}>
+            Vulnerability scanner powered by{' '}
+            <a href="https://www.greenbone.net/" target="_blank" rel="noreferrer"
+              style={{ color: 'var(--accent)' }}>Greenbone Community Edition</a>.
+            Credentials stored encrypted. Connect via Unix socket (Docker) or TLS host.
+          </p>
+
+          <Field label="Unix Socket Path" hint="Docker: /var/run/gvmd/gvmd.sock — leave Host blank to use socket">
+            <input value={openvas.socket_path}
+              onChange={e => setOpenVas(o => ({ ...o, socket_path: e.target.value }))}
+              placeholder="/var/run/gvmd/gvmd.sock" />
+          </Field>
+          <Field label="Host" hint="Override socket — e.g. 192.168.1.50 for remote GVM">
+            <input value={openvas.host}
+              onChange={e => setOpenVas(o => ({ ...o, host: e.target.value }))}
+              placeholder="Leave blank to use socket" />
+          </Field>
+          <Field label="GMP Port" hint="Only used when Host is set">
+            <input type="number" value={openvas.port}
+              onChange={e => setOpenVas(o => ({ ...o, port: +e.target.value }))}
+              style={{ width: 100 }} />
+          </Field>
+          <Field label="Username">
+            <input value={openvas.username}
+              onChange={e => setOpenVas(o => ({ ...o, username: e.target.value }))}
+              autoComplete="off" />
+          </Field>
+          <Field label="Password" hint="Leave blank to keep existing">
+            <input type="password" value={openvas.password}
+              placeholder={openvas.password === MASK ? 'Saved — enter new to change' : ''}
+              onChange={e => setOpenVas(o => ({ ...o, password: e.target.value }))}
+              autoComplete="new-password" />
+          </Field>
+
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button type="button" className="secondary" onClick={testOpenVas} disabled={ovTesting}>
+              {ovTesting ? 'Testing…' : 'Test Connection'}
+            </button>
+            {ovTest && (
+              <span style={{ fontSize: 12, color: ovTest.ok ? 'var(--green)' : 'var(--red)' }}>
+                {ovTest.ok ? '✓' : '✗'} {ovTest.msg}
               </span>
             )}
           </div>

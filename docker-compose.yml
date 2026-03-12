@@ -10,6 +10,7 @@ services:
     volumes:
       - ./data:/app/data          # SQLite database + persistent state
       - ./config:/app/config      # User config (credentials, scan ranges, etc.)
+      - gvmd-socket:/var/run/gvmd # Shared gvmd Unix socket from OpenVAS
     # Set these in Portainer → Stack → Environment Variables (or in a local .env file)
     # Required: SECRET_KEY, ADMIN_PASSWORD
     # Optional: ADMIN_USERNAME (default: admin), TOKEN_EXPIRE_HOURS (default: 8)
@@ -23,6 +24,8 @@ services:
       - TOKEN_EXPIRE_HOURS=${TOKEN_EXPIRE_HOURS:-8}
     networks:
       - baumlab
+    depends_on:
+      - openvas
     # HOST networking required for raw ICMP ping and ARP scanning
     # Swap to the line below if you want ping/ARP to see your LAN:
     # network_mode: host
@@ -40,6 +43,35 @@ services:
       - api
     networks:
       - baumlab
+
+  # ---------------------------------------------------------------------------
+  # Greenbone Community Edition / OpenVAS
+  # Powered by OpenVAS — https://www.openvas.org/
+  # Greenbone Community Edition — https://github.com/greenbone/
+  # ---------------------------------------------------------------------------
+  # NOTE: First startup takes 15-60 minutes to sync the NVT/SCAP/CERT feed data.
+  # The gvmd Unix socket is shared with the api container via the gvmd-socket volume.
+  # Default admin credentials are set via OPENVAS_ADMIN_PASSWORD below.
+  # ---------------------------------------------------------------------------
+  openvas:
+    image: immauss/openvas:latest
+    container_name: baumlab-openvas
+    restart: unless-stopped
+    hostname: openvas
+    volumes:
+      - openvas-data:/data              # NVT feeds, SCAP/CERT data, scan results
+      - gvmd-socket:/var/run/gvmd       # Unix socket shared with api container
+    environment:
+      - USERNAME=${OPENVAS_ADMIN_USERNAME:-admin}
+      - PASSWORD=${OPENVAS_ADMIN_PASSWORD:-changeme}
+    ports:
+      - "${OPENVAS_PORT:-9392}:9392"    # Greenbone Security Assistant web UI (optional)
+    networks:
+      - baumlab
+
+volumes:
+  openvas-data:    # Persistent NVT/SCAP/CERT feed data and scan results
+  gvmd-socket:     # Ephemeral shared volume for gvmd Unix socket
 
 networks:
   baumlab:
