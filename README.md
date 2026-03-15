@@ -2,6 +2,8 @@
 
 A self-hosted home lab monitoring, mapping, and security dashboard. Discover everything on your network, watch service health in real time, scan for open ports and vulnerabilities, and pull live data from your UniFi controller — all in one dark-themed web UI.
 
+![BaumLab screenshot](docs/screenshot.png)
+
 ---
 
 ## Features
