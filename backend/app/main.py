@@ -12,7 +12,10 @@ from .models.user import User
 from .services.monitor import run_check
 from .services.auth import hash_password
 from .routers import devices, monitors, scan, unifi, auth, users, settings, external_scan, status, advanced_scan, vuln_scan
+from .routers import syslog as syslog_router, portainer as portainer_router
 from .services.config_service import read_config
+from .services.syslog_listener import start_syslog_listener
+from .routers.portainer import _poll_all
 from .routers.scan import _upsert_devices
 
 scheduler = AsyncIOScheduler()
@@ -77,6 +80,7 @@ async def lifespan(app: FastAPI):
     migrate_db()
     _seed_admin()
     scheduler.add_job(_run_monitor_checks, "interval", seconds=30, id="monitor_checks")
+
     # Auto-scan if configured
     sc = read_config().get("scan", {})
     if sc.get("auto_scan") and sc.get("default_cidr"):
@@ -86,9 +90,30 @@ async def lifespan(app: FastAPI):
             args=[sc["default_cidr"]], id="auto_scan",
         )
         print(f"Auto-scan enabled: {sc['default_cidr']} every {interval_min} min")
+
+    # Syslog UDP listener
+    syslog_transport = None
+    cfg = read_config()
+    syslog_cfg = cfg.get("syslog", {})
+    if syslog_cfg.get("enabled", True):
+        syslog_port = int(syslog_cfg.get("port", 514))
+        try:
+            syslog_transport, _ = await start_syslog_listener(engine, port=syslog_port)
+        except Exception as e:
+            print(f"WARNING: Could not start syslog listener on UDP :{syslog_port} — {e}")
+
+    # Portainer polling (every 60 s by default, configurable)
+    portainer_connections = cfg.get("portainer", {}).get("connections", [])
+    if any(c.get("enabled", True) for c in portainer_connections):
+        poll_interval = int(cfg.get("portainer", {}).get("poll_interval_seconds", 60))
+        scheduler.add_job(_poll_all, "interval", seconds=poll_interval, id="portainer_poll")
+        print(f"Portainer polling enabled every {poll_interval}s")
+
     scheduler.start()
     yield
     scheduler.shutdown()
+    if syslog_transport:
+        syslog_transport.close()
 
 
 app = FastAPI(title="BaumLab API", version="0.1.0", lifespan=lifespan)
@@ -111,6 +136,8 @@ app.include_router(external_scan.router)
 app.include_router(status.router)
 app.include_router(advanced_scan.router)
 app.include_router(vuln_scan.router)
+app.include_router(syslog_router.router)
+app.include_router(portainer_router.router)
 
 
 @app.get("/api/health")

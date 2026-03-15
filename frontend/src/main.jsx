@@ -13,6 +13,8 @@ import StatusPage from './pages/StatusPage'
 import TargetScanPage from './pages/TargetScanPage'
 import UniFiPage from './pages/UniFiPage'
 import VulnScanPage from './pages/VulnScanPage'
+import SyslogPage from './pages/SyslogPage'
+import PortainerPage from './pages/PortainerPage'
 import './styles.css'
 
 function App() {
@@ -35,6 +37,8 @@ function App() {
           <NavLink to="/target-scan">Target Scan</NavLink>
           <NavLink to="/unifi">UniFi</NavLink>
           <NavLink to="/vuln-scan">Vuln Scan</NavLink>
+          <NavLink to="/syslog">Syslog</NavLink>
+          <NavLink to="/portainer">Docker</NavLink>
           <NavLink to="/users">Users</NavLink>
           {isAdmin && <NavLink to="/settings">Settings</NavLink>}
           <div style={{ marginTop: 'auto', padding: '12px 16px', borderTop: '1px solid var(--border)' }}>
@@ -57,6 +61,8 @@ function App() {
             <Route path="/target-scan" element={<TargetScanPage />} />
             <Route path="/unifi" element={<UniFiPage />} />
             <Route path="/vuln-scan" element={<VulnScanPage />} />
+            <Route path="/syslog" element={<SyslogPage />} />
+            <Route path="/portainer" element={<PortainerPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Routes>
         </main>
