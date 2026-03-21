@@ -12,6 +12,7 @@ class User(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     totp_secret: Optional[str] = Field(default=None)
     totp_enabled: bool = Field(default=False)
+    oidc_sub: Optional[str] = Field(default=None, index=True)
 
 
 class UserPublic(BaseModel):

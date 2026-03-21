@@ -22,6 +22,8 @@ def migrate_db():
     migrations = [
         "ALTER TABLE user ADD COLUMN totp_secret TEXT",
         "ALTER TABLE user ADD COLUMN totp_enabled BOOLEAN NOT NULL DEFAULT 0",
+        "ALTER TABLE user ADD COLUMN oidc_sub TEXT",
+        "CREATE INDEX IF NOT EXISTS ix_user_oidc_sub ON user (oidc_sub)",
     ]
     with engine.connect() as conn:
         for stmt in migrations:

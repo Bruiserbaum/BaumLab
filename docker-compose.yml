@@ -24,6 +24,13 @@ services:
       - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD}
       - TOKEN_EXPIRE_HOURS=${TOKEN_EXPIRE_HOURS:-8}
+      # Authentik SSO — uncomment and fill in .env to enable
+      # - OIDC_ENABLED=${OIDC_ENABLED:-false}
+      # - OIDC_ISSUER=${OIDC_ISSUER}
+      # - OIDC_CLIENT_ID=${OIDC_CLIENT_ID}
+      # - OIDC_CLIENT_SECRET=${OIDC_CLIENT_SECRET}
+      # - OIDC_REDIRECT_URI=${OIDC_REDIRECT_URI}
+      # - OIDC_FRONTEND_URL=${OIDC_FRONTEND_URL}
     networks:
       - baumlab
     depends_on:

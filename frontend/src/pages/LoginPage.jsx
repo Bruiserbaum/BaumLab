@@ -8,9 +8,25 @@ export default function LoginPage() {
   const [step, setStep]         = useState('password')   // 'password' | 'totp'
   const [mfaToken, setMfaToken] = useState('')
   const [code, setCode]         = useState('')
-  const [error, setError]       = useState('')
   const [loading, setLoading]   = useState(false)
   const codeRef = useRef(null)
+
+  // Read ?oidc_error= from URL (set by /api/auth/oidc/callback on failure)
+  const [error, setError] = useState(() => {
+    const params = new URLSearchParams(window.location.search)
+    const e = params.get('oidc_error')
+    if (e) window.history.replaceState({}, '', '/')
+    return e ? `SSO login failed: ${e.replace(/_/g, ' ')}` : ''
+  })
+
+  // Fetch OIDC config to decide whether to show the SSO button
+  const [oidcEnabled, setOidcEnabled] = useState(false)
+  useEffect(() => {
+    fetch('/api/auth/config')
+      .then(r => r.json())
+      .then(d => setOidcEnabled(!!d.oidc_enabled))
+      .catch(() => {})
+  }, [])
 
   useEffect(() => {
     if (step === 'totp') codeRef.current?.focus()
@@ -76,6 +92,21 @@ export default function LoginPage() {
           <button type="submit" disabled={loading} style={{ marginTop: 4 }}>
             {loading ? 'Signing in…' : 'Sign In'}
           </button>
+
+          {oidcEnabled && (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '4px 0' }}>
+                <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>or</span>
+                <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+              </div>
+              <a href="/api/auth/oidc/login" style={{ textDecoration: 'none' }}>
+                <button type="button" className="secondary" style={{ width: '100%' }}>
+                  Login with Authentik
+                </button>
+              </a>
+            </>
+          )}
         </form>
       )}
 

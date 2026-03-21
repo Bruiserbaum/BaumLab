@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback } from 'react'
+import React, { createContext, useContext, useState, useCallback, useEffect } from 'react'
 
 const AuthContext = createContext(null)
 
@@ -7,6 +7,25 @@ export function AuthProvider({ children }) {
   const [user, setUser]   = useState(() => {
     try { return JSON.parse(localStorage.getItem('bl_user')) } catch { return null }
   })
+
+  // Handle OIDC callback: ?token=<jwt> redirected here from /api/auth/oidc/callback
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const urlToken = params.get('token')
+    if (!urlToken) return
+    window.history.replaceState({}, '', window.location.pathname)
+    ;(async () => {
+      try {
+        const res = await fetch('/api/auth/me', { headers: { Authorization: `Bearer ${urlToken}` } })
+        if (!res.ok) return
+        const me = await res.json()
+        localStorage.setItem('bl_token', urlToken)
+        localStorage.setItem('bl_user', JSON.stringify(me))
+        setToken(urlToken)
+        setUser(me)
+      } catch { /* invalid token — leave login page visible */ }
+    })()
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function _finalize(access_token) {
     const meRes = await fetch('/api/auth/me', { headers: { Authorization: `Bearer ${access_token}` } })

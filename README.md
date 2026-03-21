@@ -121,6 +121,12 @@ docker compose up -d
 | `OPENVAS_ADMIN_USERNAME` | `admin` | OpenVAS admin user |
 | `OPENVAS_ADMIN_PASSWORD` | `changeme` | **Change this.** OpenVAS admin password |
 | `OPENVAS_PORT` | `9392` | Greenbone Security Assistant port |
+| `OIDC_ENABLED` | `false` | Set to `true` to enable Authentik SSO login |
+| `OIDC_ISSUER` | — | Authentik provider URL — `https://auth.yourdomain.com/application/o/<app-slug>/` |
+| `OIDC_CLIENT_ID` | — | OAuth2 client ID from Authentik |
+| `OIDC_CLIENT_SECRET` | — | OAuth2 client secret from Authentik |
+| `OIDC_REDIRECT_URI` | — | Full callback URL — `http://your-server:8100/api/auth/oidc/callback` |
+| `OIDC_FRONTEND_URL` | *(empty)* | Only needed when API and frontend are on different ports with no shared proxy |
 
 ### `config/config.yaml`
 
@@ -143,6 +149,22 @@ monitor:
 ```
 
 All UniFi and OpenVAS settings can also be changed at runtime from the Settings page without editing files.
+
+---
+
+## Authentik SSO (Optional)
+
+BaumLab supports OIDC login via Authentik. When enabled, a **Login with Authentik** button appears on the login page alongside the standard username/password form. Both methods coexist — existing local accounts are unaffected.
+
+### Setup
+
+1. In Authentik, create an **OAuth2/OpenID Provider** and an **Application** for it.
+2. Set the redirect URI to: `http://your-server:8100/api/auth/oidc/callback`
+   (or `https://baumlab.yourdomain.com/api/auth/oidc/callback` if behind a reverse proxy)
+3. Set the OIDC env vars in `.env` and uncomment them in `docker-compose.yml`.
+4. Rebuild and restart: `docker compose up -d --build`
+
+First-time SSO users get a local account created automatically. OIDC users cannot log in with a password — their account is linked to the Authentik subject ID.
 
 ---
 
@@ -192,14 +214,36 @@ Full interactive docs available at `http://localhost:8100/docs` when running.
 
 ---
 
-## Related Projects
-
-- [BaumDash](https://github.com/Bruiserbaum/BaumDash) â€” Desktop dashboard with audio mixer, Discord, media controls, and a Status tab that can embed the BaumLab public status page
-- [BaumLaunch](https://github.com/Bruiserbaum/BaumLaunch) â€” WinGet-based GUI package manager for Windows
-- [BaumDocker](https://github.com/Bruiserbaum/BaumDocker) â€” Home lab Docker stack collection
-- [BaumSecure](https://github.com/Bruiserbaum/BaumSecure) â€” Windows home lab security analyzer
-
+## BaumLab Suite
+**[Download BaumLab Suite](https://github.com/Bruiserbaum/BaumLab/releases/latest)** ΓÇö a single Windows installer that installs and keeps all BaumLab apps up to date.
+BaumLab Suite checks GitHub for the latest release of each app, detects what you already have installed via the Windows registry, and silently installs or updates your selection ΓÇö no wizard windows, no manual downloads.
+### Apps included
+| App | Description |
+|-----|-------------|
+| [BaumDash](https://github.com/Bruiserbaum/BaumDash) | Ultrawide desktop dashboard ΓÇö audio mixer, media controls, Discord voice, system stats |
+| [BaumLaunch](https://github.com/Bruiserbaum/BaumLaunch) | WinGet GUI package manager with system tray updater and curated app catalog |
+| [BaumAdminTool](https://github.com/Bruiserbaum/BaumAdminTool) | Windows admin utility ΓÇö system overview, process monitor, RoboCopy backup, event logs |
+| [BaumSecure](https://github.com/Bruiserbaum/BaumSecure) | Homelab security analyzer ΓÇö scans your external attack surface and flags misconfigurations |
+| [BaumScriptCodex](https://github.com/Bruiserbaum/BaumScriptCodex) | Script library for IT admins ΓÇö store, search, tag, and copy PowerShell/Bash/Batch scripts |
+| [BaumKeyGenerator](https://github.com/Bruiserbaum/BaumKeyGenerator) | Secret key generator ΓÇö hex, base64, JWT, database passwords, Vaultwarden Argon2 tokens |
+### How it works
+1. Launch BaumLab Suite ΓÇö it queries the GitHub releases API for each app in parallel
+2. Installed versions are detected from the Windows registry (Inno Setup uninstall entries)
+3. Apps with available updates are highlighted in amber
+4. Check the apps you want, then click **Install / Update Selected**
+5. Each installer runs silently in the background ΓÇö progress and status shown in real time
+**Requirements:** Windows 10 21H1 or later, x64. No .NET runtime required (self-contained).
+Source: [BaumLabSuite/](BaumLabSuite/)
 ---
+## Related Projects
+- [BaumLab Suite](https://github.com/Bruiserbaum/BaumLab/releases/latest) ΓÇö One-click installer and updater for all BaumLab apps (this repo)
+- [BaumDash](https://github.com/Bruiserbaum/BaumDash) ΓÇö Desktop dashboard with audio mixer, Discord, media controls, and a Status tab that can embed the BaumLab public status page
+- [BaumLaunch](https://github.com/Bruiserbaum/BaumLaunch) ΓÇö WinGet-based GUI package manager for Windows
+- [BaumAdminTool](https://github.com/Bruiserbaum/BaumAdminTool) ΓÇö Portable dark-theme Windows admin utility
+- [BaumDocker](https://github.com/Bruiserbaum/BaumDocker) ΓÇö Home lab Docker stack collection
+- [BaumSecure](https://github.com/Bruiserbaum/BaumSecure) ΓÇö Windows home lab security analyzer
+- [BaumScriptCodex](https://github.com/Bruiserbaum/BaumScriptCodex) ΓÇö Script library for IT admins
+- [BaumKeyGenerator](https://github.com/Bruiserbaum/BaumKeyGenerator) ΓÇö Secret key and token generator---
 
 ## License and Project Status
 
