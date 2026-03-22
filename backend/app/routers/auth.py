@@ -29,6 +29,12 @@ from ..services.auth import (
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
+
+@router.get("/version")
+def version():
+    from ..main import APP_VERSION
+    return {"version": APP_VERSION}
+
 # ── OIDC config ───────────────────────────────────────────────────────────────
 _OIDC_ENABLED           = os.getenv("OIDC_ENABLED", "false").lower() == "true"
 _HEADER_AUTH_ENABLED    = os.getenv("AUTHENTIK_HEADER_AUTH", "false").lower() == "true"

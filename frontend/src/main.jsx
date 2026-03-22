@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useEffect, useState } from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom'
 import { AuthProvider, useAuth } from './auth'
@@ -19,6 +19,11 @@ import './styles.css'
 
 function App() {
   const { token, user, logout, isAdmin, authChecking } = useAuth()
+  const [appVersion, setAppVersion] = useState('')
+
+  useEffect(() => {
+    fetch('/api/auth/version').then(r => r.ok ? r.json() : null).then(d => { if (d) setAppVersion(d.version) })
+  }, [])
 
   // Public route — no login required
   if (window.location.pathname === '/status') return <StatusPage />
@@ -52,6 +57,11 @@ function App() {
             <button className="secondary" style={{ width: '100%', fontSize: 12 }} onClick={logout}>
               Sign Out
             </button>
+            {appVersion && (
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 8, textAlign: 'center', opacity: 0.6 }}>
+                v{appVersion}
+              </div>
+            )}
           </div>
         </nav>
         <main className="content">

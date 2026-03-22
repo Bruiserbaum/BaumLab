@@ -9,14 +9,17 @@ from datetime import datetime
 from .database import create_db_and_tables, migrate_db, engine
 from .models.monitor import MonitorTarget, MonitorResult
 from .models.user import User
+from .models.vuln_schedule import ScheduledVulnScan
 from .services.monitor import run_check
 from .services.auth import hash_password
 from .routers import devices, monitors, scan, unifi, auth, users, settings, external_scan, status, advanced_scan, vuln_scan
 from .routers import syslog as syslog_router, portainer as portainer_router
-from .services.config_service import read_config
+from .services.config_service import read_config, decrypt
 from .services.syslog_listener import start_syslog_listener
 from .routers.portainer import _poll_all
 from .routers.scan import _upsert_devices
+
+APP_VERSION = "1.0.0"  # bump this on every release
 
 scheduler = AsyncIOScheduler()
 
@@ -53,6 +56,46 @@ async def _run_monitor_checks():
         session.commit()
 
 
+async def _run_scheduled_vuln_scans():
+    """Run any vuln scans that are due based on their weekly/monthly frequency."""
+    from .services.openvas import OpenVasService
+    cfg = read_config().get("openvas", {})
+    if not cfg.get("username"):
+        return  # OpenVAS not configured
+    svc = OpenVasService(
+        username=cfg.get("username", "admin"),
+        password=decrypt(cfg.get("password", "")),
+        socket_path=cfg.get("socket_path", "/var/run/gvmd/gvmd.sock"),
+        host=cfg.get("host") or None,
+        port=int(cfg.get("port", 9390)),
+    )
+    now = datetime.utcnow()
+    with Session(engine) as session:
+        schedules = session.exec(
+            select(ScheduledVulnScan).where(ScheduledVulnScan.enabled == True)
+        ).all()
+        for s in schedules:
+            if s.last_run_at is not None:
+                elapsed_days = (now - s.last_run_at).total_seconds() / 86400
+                threshold = 7 if s.frequency == "weekly" else 30
+                if elapsed_days < threshold:
+                    continue
+            try:
+                result = svc.create_and_start(
+                    host_target=s.target,
+                    scan_config_id=s.scan_config_id,
+                    task_name=f"{s.name} (scheduled {now.strftime('%Y-%m-%d')})",
+                )
+                s.last_run_at = now
+                s.last_task_id = result["task_id"]
+                s.last_task_name = result["name"]
+                session.add(s)
+                print(f"Scheduled vuln scan '{s.name}' started: task {result['task_id']}")
+            except Exception as e:
+                print(f"Scheduled vuln scan '{s.name}' failed: {e}")
+        session.commit()
+
+
 def _seed_admin():
     """Create the initial admin user from env vars if no users exist yet."""
     # .strip() guards against invisible trailing whitespace from Portainer / .env files
@@ -80,6 +123,8 @@ async def lifespan(app: FastAPI):
     migrate_db()
     _seed_admin()
     scheduler.add_job(_run_monitor_checks, "interval", seconds=30, id="monitor_checks")
+    # Check scheduled vuln scans every 6 hours
+    scheduler.add_job(_run_scheduled_vuln_scans, "interval", hours=6, id="vuln_scan_scheduler")
 
     # Auto-scan if configured
     sc = read_config().get("scan", {})
@@ -103,11 +148,10 @@ async def lifespan(app: FastAPI):
             print(f"WARNING: Could not start syslog listener on UDP :{syslog_port} — {e}")
 
     # Portainer polling (every 60 s by default, configurable)
-    portainer_connections = cfg.get("portainer", {}).get("connections", [])
-    if any(c.get("enabled", True) for c in portainer_connections):
-        poll_interval = int(cfg.get("portainer", {}).get("poll_interval_seconds", 60))
-        scheduler.add_job(_poll_all, "interval", seconds=poll_interval, id="portainer_poll")
-        print(f"Portainer polling enabled every {poll_interval}s")
+    # Always register the job so new connections added after startup are picked up automatically
+    poll_interval = int(cfg.get("portainer", {}).get("poll_interval_seconds", 60))
+    scheduler.add_job(_poll_all, "interval", seconds=poll_interval, id="portainer_poll")
+    print(f"Portainer polling enabled every {poll_interval}s")
 
     scheduler.start()
     yield

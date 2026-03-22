@@ -1,8 +1,13 @@
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlmodel import Session, select
 from typing import Optional
 
-from ..services.auth import get_current_user
+from ..database import get_session
+from ..models.vuln_schedule import ScheduledVulnScan
+from ..services.auth import get_current_user, require_admin
 from ..services.openvas import OpenVasService
 from ..services.config_service import read_config, decrypt
 
@@ -82,4 +87,52 @@ def start_scan(req: StartRequest):
 @router.delete("/tasks/{task_id}")
 def delete_task(task_id: str):
     _get_service().delete_task(task_id)
+    return {"status": "deleted"}
+
+
+# ── Scheduled scans ───────────────────────────────────────────────────────────
+
+class ScheduleRequest(BaseModel):
+    name: str
+    target: str
+    scan_config_id: str
+    frequency: str  # "weekly" or "monthly"
+    enabled: bool = True
+
+
+@router.get("/schedules")
+def list_schedules(session: Session = Depends(get_session)):
+    return session.exec(select(ScheduledVulnScan).order_by(ScheduledVulnScan.name)).all()
+
+
+@router.post("/schedules", dependencies=[Depends(require_admin)])
+def create_schedule(req: ScheduleRequest, session: Session = Depends(get_session)):
+    if req.frequency not in ("weekly", "monthly"):
+        raise HTTPException(status_code=400, detail="frequency must be 'weekly' or 'monthly'")
+    sched = ScheduledVulnScan(**req.dict())
+    session.add(sched)
+    session.commit()
+    session.refresh(sched)
+    return sched
+
+
+@router.patch("/schedules/{sched_id}/toggle", dependencies=[Depends(require_admin)])
+def toggle_schedule(sched_id: int, session: Session = Depends(get_session)):
+    sched = session.get(ScheduledVulnScan, sched_id)
+    if not sched:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    sched.enabled = not sched.enabled
+    session.add(sched)
+    session.commit()
+    session.refresh(sched)
+    return sched
+
+
+@router.delete("/schedules/{sched_id}", dependencies=[Depends(require_admin)])
+def delete_schedule(sched_id: int, session: Session = Depends(get_session)):
+    sched = session.get(ScheduledVulnScan, sched_id)
+    if not sched:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    session.delete(sched)
+    session.commit()
     return {"status": "deleted"}

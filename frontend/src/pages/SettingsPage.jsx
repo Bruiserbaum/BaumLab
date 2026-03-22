@@ -1,6 +1,14 @@
 import React, { useEffect, useState } from 'react'
 import { useAuth, useApi } from '../auth'
 
+function useVersion() {
+  const [version, setVersion] = useState('')
+  useEffect(() => {
+    fetch('/api/auth/version').then(r => r.ok ? r.json() : null).then(d => { if (d) setVersion(d.version) })
+  }, [])
+  return version
+}
+
 const MASK = '••••••••'
 
 const blankUnifi   = { url: '', username: '', password: '', api_key: '', site: 'default', verify_ssl: false, controller_type: 'classic' }
@@ -10,6 +18,7 @@ const blankOpenVas = { socket_path: '/var/run/gvmd/gvmd.sock', host: '', port: 9
 export default function SettingsPage() {
   const { isAdmin } = useAuth()
   const api = useApi()
+  const version = useVersion()
   const [unifi, setUnifi]       = useState(blankUnifi)
   const [scan, setScan]         = useState(blankScan)
   const [openvas, setOpenVas]   = useState(blankOpenVas)
@@ -225,6 +234,14 @@ export default function SettingsPage() {
           {saved && <span style={{ fontSize: 12, color: 'var(--green)' }}>✓ Saved</span>}
         </div>
       </form>
+
+      {/* ── About ── */}
+      <section className="card" style={{ marginTop: 24 }}>
+        <h2 style={{ marginTop: 0, marginBottom: 8, fontSize: 15 }}>About</h2>
+        <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+          BaumLab{version && <span style={{ marginLeft: 8, fontFamily: 'monospace', color: 'var(--text)' }}>v{version}</span>}
+        </div>
+      </section>
     </div>
   )
 }

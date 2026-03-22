@@ -16,7 +16,13 @@ export default function UsersPage() {
 
   async function load() {
     const r = await api('/api/users/')
-    if (r.ok) setUsers(await r.json())
+    if (r.ok) {
+      setUsers(await r.json())
+    } else if (r.status === 403) {
+      // Non-admin: show only the current user
+      const meR = await api('/api/auth/me')
+      if (meR.ok) setUsers([await meR.json()])
+    }
   }
 
   useEffect(() => { load() }, [])

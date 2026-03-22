@@ -4,7 +4,7 @@
  * OpenVAS is open-source software licensed under GPLv2.
  */
 import React, { useEffect, useState, useCallback } from 'react'
-import { useApi } from '../auth'
+import { useApi, useAuth } from '../auth'
 
 const API = '/api/vuln-scan'
 const POLL_MS = 8000
@@ -51,6 +51,7 @@ function StatusBadge({ status, progress }) {
 
 export default function VulnScanPage() {
   const api = useApi()
+  const { isAdmin } = useAuth()
   const [health, setHealth]     = useState(null)
   const [configs, setConfigs]   = useState([])
   const [tasks, setTasks]       = useState([])
@@ -63,6 +64,13 @@ export default function VulnScanPage() {
   const [results, setResults]   = useState({})     // task_id → findings[]
   const [loadingRes, setLoadingRes] = useState(null)
 
+  // Scheduled scans
+  const [schedules, setSchedules] = useState([])
+  const [showSchedForm, setShowSchedForm] = useState(false)
+  const [schedForm, setSchedForm] = useState({ name: '', target: '', scan_config_id: '', frequency: 'weekly' })
+  const [schedSaving, setSchedSaving] = useState(false)
+  const [schedErr, setSchedErr] = useState('')
+
   const load = useCallback(async () => {
     const [hr, tr] = await Promise.all([
       api(`${API}/health`),
@@ -70,6 +78,11 @@ export default function VulnScanPage() {
     ])
     if (hr.ok) setHealth(await hr.json())
     if (tr.ok) setTasks(await tr.json())
+  }, [api])
+
+  const loadSchedules = useCallback(async () => {
+    const r = await api(`${API}/schedules`)
+    if (r.ok) setSchedules(await r.json())
   }, [api])
 
   const loadConfigs = useCallback(async () => {
@@ -84,6 +97,7 @@ export default function VulnScanPage() {
   useEffect(() => {
     load()
     loadConfigs()
+    loadSchedules()
   }, [])
 
   // Poll while any task is running
@@ -120,6 +134,36 @@ export default function VulnScanPage() {
     const r = await api(`${API}/tasks/${taskId}/results`)
     if (r.ok) { const data = await r.json(); setResults(prev => ({ ...prev, [taskId]: data })) }
     setLoadingRes(null)
+  }
+
+  async function createSchedule(e) {
+    e.preventDefault()
+    setSchedSaving(true); setSchedErr('')
+    const r = await api(`${API}/schedules`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...schedForm, scan_config_id: schedForm.scan_config_id || configId }),
+    })
+    if (r.ok) {
+      setSchedForm({ name: '', target: '', scan_config_id: '', frequency: 'weekly' })
+      setShowSchedForm(false)
+      await loadSchedules()
+    } else {
+      const d = await r.json().catch(() => ({}))
+      setSchedErr(d.detail || 'Failed to save schedule')
+    }
+    setSchedSaving(false)
+  }
+
+  async function toggleSchedule(id) {
+    await api(`${API}/schedules/${id}/toggle`, { method: 'PATCH' })
+    await loadSchedules()
+  }
+
+  async function deleteSchedule(id) {
+    if (!confirm('Delete this scheduled scan?')) return
+    await api(`${API}/schedules/${id}`, { method: 'DELETE' })
+    await loadSchedules()
   }
 
   async function deleteTask(taskId, e) {
@@ -288,6 +332,118 @@ export default function VulnScanPage() {
           </div>
         )
       })}
+
+      {/* ── Scheduled Scans ── */}
+      <div style={{ marginTop: 32 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+          <h2 style={{ margin: 0, fontSize: 16 }}>Scheduled Scans</h2>
+          {isAdmin && (
+            <button className="secondary" style={{ fontSize: 12 }}
+              onClick={() => { setShowSchedForm(s => !s); setSchedErr('') }}>
+              {showSchedForm ? 'Cancel' : '+ Add Schedule'}
+            </button>
+          )}
+        </div>
+
+        {showSchedForm && isAdmin && (
+          <form className="card" onSubmit={createSchedule}
+            style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 16 }}>
+            <label>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Name</div>
+              <input required value={schedForm.name} onChange={e => setSchedForm(x => ({ ...x, name: e.target.value }))}
+                placeholder="Weekly gateway scan" style={{ width: 180 }} />
+            </label>
+            <label>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Target IP / Hostname</div>
+              <input required value={schedForm.target} onChange={e => setSchedForm(x => ({ ...x, target: e.target.value }))}
+                placeholder="192.168.1.1" style={{ width: 160 }} />
+            </label>
+            <label>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Scan Config</div>
+              <select value={schedForm.scan_config_id || configId}
+                onChange={e => setSchedForm(x => ({ ...x, scan_config_id: e.target.value }))}
+                style={{ minWidth: 200 }}>
+                {configs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </label>
+            <label>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Frequency</div>
+              <select value={schedForm.frequency} onChange={e => setSchedForm(x => ({ ...x, frequency: e.target.value }))} style={{ width: 110 }}>
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+              </select>
+            </label>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <button type="submit" disabled={schedSaving}>{schedSaving ? 'Saving…' : 'Add Schedule'}</button>
+              {schedErr && <span style={{ fontSize: 11, color: 'var(--red)' }}>{schedErr}</span>}
+            </div>
+          </form>
+        )}
+
+        {schedules.length === 0 ? (
+          <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>
+            No scheduled scans yet.{isAdmin ? ' Add one above.' : ''}
+          </div>
+        ) : (
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                {['Name', 'Target', 'Config', 'Frequency', 'Enabled', 'Last Run', isAdmin ? '' : null]
+                  .filter(Boolean).map(h => (
+                  <th key={h} style={{ padding: '6px 10px', textAlign: 'left', color: 'var(--text-muted)', fontWeight: 600, fontSize: 12 }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {schedules.map(s => (
+                <tr key={s.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                  <td style={{ padding: '7px 10px', fontWeight: 500 }}>{s.name}</td>
+                  <td style={{ padding: '7px 10px', fontFamily: 'monospace', fontSize: 12, color: 'var(--text-muted)' }}>{s.target}</td>
+                  <td style={{ padding: '7px 10px', color: 'var(--text-muted)', fontSize: 12 }}>
+                    {configs.find(c => c.id === s.scan_config_id)?.name || s.scan_config_id.slice(0, 8) + '…'}
+                  </td>
+                  <td style={{ padding: '7px 10px' }}>
+                    <span style={{
+                      fontSize: 11, fontWeight: 600, textTransform: 'capitalize',
+                      color: s.frequency === 'weekly' ? '#79c0ff' : '#e3b341',
+                      background: s.frequency === 'weekly' ? 'rgba(121,192,255,0.1)' : 'rgba(227,179,65,0.1)',
+                      border: `1px solid ${s.frequency === 'weekly' ? '#79c0ff40' : '#e3b34140'}`,
+                      padding: '2px 8px', borderRadius: 4,
+                    }}>{s.frequency}</span>
+                  </td>
+                  <td style={{ padding: '7px 10px' }}>
+                    {isAdmin ? (
+                      <button className="secondary" style={{ fontSize: 11, padding: '2px 8px',
+                        color: s.enabled ? 'var(--green)' : 'var(--text-muted)' }}
+                        onClick={() => toggleSchedule(s.id)}>
+                        {s.enabled ? 'On' : 'Off'}
+                      </button>
+                    ) : (
+                      <span style={{ color: s.enabled ? 'var(--green)' : 'var(--text-muted)', fontSize: 12 }}>
+                        {s.enabled ? 'On' : 'Off'}
+                      </span>
+                    )}
+                  </td>
+                  <td style={{ padding: '7px 10px', color: 'var(--text-muted)', fontSize: 12 }}>
+                    {s.last_run_at ? new Date(s.last_run_at).toLocaleString() : '—'}
+                    {s.last_task_name && (
+                      <div style={{ fontSize: 11, marginTop: 2 }}>
+                        Task: <span style={{ fontFamily: 'monospace' }}>{s.last_task_name}</span>
+                      </div>
+                    )}
+                  </td>
+                  {isAdmin && (
+                    <td style={{ padding: '7px 10px' }}>
+                      <button className="secondary" style={{ fontSize: 11, padding: '2px 8px', color: 'var(--red)' }}
+                        onClick={() => deleteSchedule(s.id)}>Remove</button>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
 
       {/* Footer credit */}
       <div style={{ marginTop: 32, fontSize: 11, color: 'var(--text-muted)', borderTop: '1px solid var(--border)', paddingTop: 12 }}>
