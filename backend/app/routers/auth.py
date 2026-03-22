@@ -195,7 +195,7 @@ def header_login(request: Request, session: Session = Depends(get_session)):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="No Authentik header present")
     user = session.exec(select(User).where(User.username == username)).first()
     if not user:
-        user = User(username=username, hashed_password="", is_admin=False)
+        user = User(username=username, hashed_password="", is_admin=True)
         session.add(user)
         session.commit()
         session.refresh(user)
@@ -284,7 +284,7 @@ def oidc_callback(
         while session.exec(select(User).where(User.username == username)).first():
             username = f"{preferred}_{counter}"
             counter += 1
-        user = User(username=username, hashed_password="", oidc_sub=sub, is_admin=False)
+        user = User(username=username, hashed_password="", oidc_sub=sub, is_admin=True)
         session.add(user)
         session.commit()
         session.refresh(user)
