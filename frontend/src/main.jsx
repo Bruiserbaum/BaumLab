@@ -18,10 +18,13 @@ import PortainerPage from './pages/PortainerPage'
 import './styles.css'
 
 function App() {
-  const { token, user, logout, isAdmin } = useAuth()
+  const { token, user, logout, isAdmin, authChecking } = useAuth()
 
   // Public route — no login required
   if (window.location.pathname === '/status') return <StatusPage />
+
+  // Wait for silent auth checks (OIDC callback / header auth) before deciding to show login
+  if (authChecking) return null
 
   if (!token) return <LoginPage />
 

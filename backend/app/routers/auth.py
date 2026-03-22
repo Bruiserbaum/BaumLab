@@ -9,7 +9,7 @@ import httpx
 import pyotp
 import qrcode
 import qrcode.image.svg
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
 from jose import jwt as jose_jwt, JWTError
 from pydantic import BaseModel
@@ -30,7 +30,8 @@ from ..services.auth import (
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 # ── OIDC config ───────────────────────────────────────────────────────────────
-_OIDC_ENABLED       = os.getenv("OIDC_ENABLED", "false").lower() == "true"
+_OIDC_ENABLED           = os.getenv("OIDC_ENABLED", "false").lower() == "true"
+_HEADER_AUTH_ENABLED    = os.getenv("AUTHENTIK_HEADER_AUTH", "false").lower() == "true"
 _OIDC_ISSUER        = os.getenv("OIDC_ISSUER", "").rstrip("/") + "/"
 _OIDC_CLIENT_ID     = os.getenv("OIDC_CLIENT_ID", "")
 _OIDC_CLIENT_SECRET = os.getenv("OIDC_CLIENT_SECRET", "")
@@ -173,7 +174,26 @@ def mfa_disable(
 @router.get("/config")
 def auth_config():
     """Public endpoint — returns which auth methods are available."""
-    return {"oidc_enabled": _OIDC_ENABLED}
+    return {"oidc_enabled": _OIDC_ENABLED, "header_auth_enabled": _HEADER_AUTH_ENABLED}
+
+
+@router.get("/header-login")
+def header_login(request: Request, session: Session = Depends(get_session)):
+    """Called by the frontend on page load when Authentik forward auth is active.
+    Reads the X-authentik-username header injected by NPM and issues a local JWT,
+    creating a user account on first visit. Requires AUTHENTIK_HEADER_AUTH=true."""
+    if not _HEADER_AUTH_ENABLED:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Header auth is not enabled")
+    username = request.headers.get("X-authentik-username", "").strip()
+    if not username:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="No Authentik header present")
+    user = session.exec(select(User).where(User.username == username)).first()
+    if not user:
+        user = User(username=username, hashed_password="", is_admin=False)
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+    return {"access_token": create_access_token(user.id), "token_type": "bearer"}
 
 
 @router.get("/oidc/login")

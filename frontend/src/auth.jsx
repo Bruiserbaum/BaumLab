@@ -7,23 +7,50 @@ export function AuthProvider({ children }) {
   const [user, setUser]   = useState(() => {
     try { return JSON.parse(localStorage.getItem('bl_user')) } catch { return null }
   })
+  // True while we're performing silent auth checks (OIDC callback or header auth).
+  // The app renders nothing during this window to avoid a login-page flash.
+  const [authChecking, setAuthChecking] = useState(true)
 
-  // Handle OIDC callback: ?token=<jwt> redirected here from /api/auth/oidc/callback
+  // Handle OIDC callback (?token=) and Authentik header auth on page load.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const urlToken = params.get('token')
-    if (!urlToken) return
-    window.history.replaceState({}, '', window.location.pathname)
+
+    if (urlToken) {
+      // OIDC redirect-back — validate the token then store it
+      window.history.replaceState({}, '', window.location.pathname)
+      ;(async () => {
+        try {
+          const res = await fetch('/api/auth/me', { headers: { Authorization: `Bearer ${urlToken}` } })
+          if (res.ok) {
+            const me = await res.json()
+            localStorage.setItem('bl_token', urlToken)
+            localStorage.setItem('bl_user', JSON.stringify(me))
+            setToken(urlToken)
+            setUser(me)
+          }
+        } catch { /* invalid token — leave login page visible */ }
+        setAuthChecking(false)
+      })()
+      return
+    }
+
+    if (localStorage.getItem('bl_token')) {
+      // Already have a stored token — no silent check needed
+      setAuthChecking(false)
+      return
+    }
+
+    // No stored token — try Authentik forward-auth header login (silent, fails gracefully)
     ;(async () => {
       try {
-        const res = await fetch('/api/auth/me', { headers: { Authorization: `Bearer ${urlToken}` } })
-        if (!res.ok) return
-        const me = await res.json()
-        localStorage.setItem('bl_token', urlToken)
-        localStorage.setItem('bl_user', JSON.stringify(me))
-        setToken(urlToken)
-        setUser(me)
-      } catch { /* invalid token — leave login page visible */ }
+        const res = await fetch('/api/auth/header-login')
+        if (res.ok) {
+          const { access_token } = await res.json()
+          await _finalize(access_token)
+        }
+      } catch { /* not configured or no header — show login page */ }
+      setAuthChecking(false)
     })()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -78,7 +105,7 @@ export function AuthProvider({ children }) {
   }, [])
 
   return (
-    <AuthContext.Provider value={{ token, user, login, completeMfaLogin, logout, isAdmin: user?.is_admin ?? false }}>
+    <AuthContext.Provider value={{ token, user, login, completeMfaLogin, logout, isAdmin: user?.is_admin ?? false, authChecking }}>
       {children}
     </AuthContext.Provider>
   )

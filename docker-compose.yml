@@ -24,7 +24,9 @@ services:
       - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD}
       - TOKEN_EXPIRE_HOURS=${TOKEN_EXPIRE_HOURS:-8}
-      # Authentik SSO — uncomment and fill in .env to enable
+      # Authentik forward auth (NPM header-based auto-login) — see BaumDocker/authentik/README
+      # - AUTHENTIK_HEADER_AUTH=${AUTHENTIK_HEADER_AUTH:-false}
+      # Authentik SSO (OIDC) — uncomment and fill in .env to enable
       # - OIDC_ENABLED=${OIDC_ENABLED:-false}
       # - OIDC_ISSUER=${OIDC_ISSUER}
       # - OIDC_CLIENT_ID=${OIDC_CLIENT_ID}
