@@ -19,7 +19,7 @@ from .services.syslog_listener import start_syslog_listener
 from .routers.portainer import _poll_all
 from .routers.scan import _upsert_devices
 
-APP_VERSION = "1.0.0"  # bump this on every release
+APP_VERSION = "1.3.0"  # bump this on every release
 
 scheduler = AsyncIOScheduler()
 
