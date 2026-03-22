@@ -36,8 +36,24 @@ export function AuthProvider({ children }) {
     }
 
     if (localStorage.getItem('bl_token')) {
-      // Already have a stored token — no silent check needed
-      setAuthChecking(false)
+      // Refresh user data to pick up any role changes since last login
+      ;(async () => {
+        try {
+          const storedToken = localStorage.getItem('bl_token')
+          const res = await fetch('/api/auth/me', { headers: { Authorization: `Bearer ${storedToken}` } })
+          if (res.ok) {
+            const me = await res.json()
+            localStorage.setItem('bl_user', JSON.stringify(me))
+            setUser(me)
+          } else if (res.status === 401) {
+            localStorage.removeItem('bl_token')
+            localStorage.removeItem('bl_user')
+            setToken(null)
+            setUser(null)
+          }
+        } catch { /* network error — keep cached user */ }
+        setAuthChecking(false)
+      })()
       return
     }
 
