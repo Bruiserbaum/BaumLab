@@ -8,6 +8,9 @@
     <AssemblyName>BaumLabSuite</AssemblyName>
     <RootNamespace>BaumLabSuite</RootNamespace>
     <ApplicationIcon>Resources\app.ico</ApplicationIcon>
+    <AssemblyTitle>BaumLab Suite</AssemblyTitle>
+    <Product>BaumLab Suite</Product>
+    <Version>1.1.0</Version>
   </PropertyGroup>
 
   <ItemGroup>

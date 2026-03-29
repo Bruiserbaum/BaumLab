@@ -33,6 +33,7 @@ public class MainForm : Form
     private void BuildUI()
     {
         Text            = "BaumLab Suite";
+        Icon            = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
         Size            = new Size(820, 700);
         MinimumSize     = new Size(700, 560);
         StartPosition   = FormStartPosition.CenterScreen;

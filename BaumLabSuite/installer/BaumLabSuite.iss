@@ -1,5 +1,5 @@
 #define MyAppName      "BaumLab Suite"
-#define MyAppVersion   "1.0.0"
+#define MyAppVersion   "1.1.0"
 #define MyAppPublisher "Bruiserbaum"
 #define MyAppURL       "https://github.com/Bruiserbaum/BaumLab"
 #define MyAppExeName   "BaumLabSuite.exe"
@@ -27,6 +27,7 @@ PrivilegesRequiredOverridesAllowed=dialog
 ArchitecturesInstallIn64BitMode=x64compatible
 ArchitecturesAllowed=x64compatible
 MinVersion=10.0.19041
+SetupIconFile=..\BaumLabSuite\Resources\app.ico
 UninstallDisplayName={#MyAppName}
 UninstallDisplayIcon={app}\{#MyAppExeName}
 
