@@ -47,5 +47,12 @@ internal static class AppCatalog
             Description = "Secret key generator — hex, base64, JWT, database passwords, Vaultwarden tokens",
             InnoAppId   = "B4A7C3D2-E5F6-4890-BCDE-F12345678901",
         },
+        new()
+        {
+            Name        = "BaumConfigure",
+            Repo        = "BaumConfigure",
+            Description = "Turing Pi 2 node configurator — generate cloud-init images, set hostname/users/SSH keys, flash via BMC",
+            InnoAppId   = "D4E5F6A7-B8C9-0DA1-B2C3-D4E5F6A7B8C9",
+        },
     ];
 }
