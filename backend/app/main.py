@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlmodel import Session, select
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from .database import create_db_and_tables, migrate_db, engine
 from .models.monitor import MonitorTarget, MonitorResult
@@ -12,8 +12,10 @@ from .models.user import User
 from .models.vuln_schedule import ScheduledVulnScan
 from .services.monitor import run_check
 from .services.auth import hash_password
-from .routers import devices, monitors, scan, unifi, auth, users, settings, external_scan, status, advanced_scan, vuln_scan
-from .routers import syslog as syslog_router, portainer as portainer_router
+from .routers import devices, monitors, scan, unifi, auth, users, settings, external_scan, status, advanced_scan, vuln_scan, services
+from .routers import syslog as syslog_router, portainer as portainer_router, git_sync as git_sync_router
+from .routers import vault as vault_router, updates as updates_router
+from .services import git_sync, updater
 from .services.config_service import read_config, decrypt
 from .services.syslog_listener import start_syslog_listener
 from .routers.portainer import _poll_all
@@ -153,6 +155,11 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(_poll_all, "interval", seconds=poll_interval, id="portainer_poll")
     print(f"Portainer polling enabled every {poll_interval}s")
 
+    git_sync.init(scheduler)
+    # Check GitHub for a newer release shortly after startup, then every 6 hours
+    scheduler.add_job(updater.check_quietly, "interval", hours=6, id="update_check",
+                      next_run_time=datetime.now() + timedelta(seconds=60))
+
     scheduler.start()
     yield
     scheduler.shutdown()
@@ -173,6 +180,7 @@ app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(devices.router)
 app.include_router(monitors.router)
+app.include_router(services.router)
 app.include_router(scan.router)
 app.include_router(unifi.router)
 app.include_router(settings.router)
@@ -182,6 +190,9 @@ app.include_router(advanced_scan.router)
 app.include_router(vuln_scan.router)
 app.include_router(syslog_router.router)
 app.include_router(portainer_router.router)
+app.include_router(git_sync_router.router)
+app.include_router(vault_router.router)
+app.include_router(updates_router.router)
 
 
 @app.get("/api/health")

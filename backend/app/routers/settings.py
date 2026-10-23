@@ -34,10 +34,26 @@ class OpenVasIn(BaseModel):
     password: Optional[str] = None  # None or MASK = keep existing
 
 
+class GitSyncIn(BaseModel):
+    repo_url: str = ""       # e.g. https://git.example.com/owner/infra-map
+    branch: str = ""         # blank = repo default branch
+    path: str = ""           # folder inside the repo; blank = root
+    token: Optional[str] = None     # None or MASK = keep existing
+    auto_sync: bool = True
+
+
+class UpdatesIn(BaseModel):
+    repo: str = ""                    # GitHub owner/repo to check for releases; blank = upstream
+    portainer_connection: str = ""    # name of a connection from the Docker page
+    stack_id: Optional[int] = None    # Portainer stack BaumLab is deployed as
+
+
 class SettingsIn(BaseModel):
     unifi: Optional[UniFiIn] = None
     scan: Optional[ScanIn] = None
     openvas: Optional[OpenVasIn] = None
+    git_sync: Optional[GitSyncIn] = None
+    updates: Optional[UpdatesIn] = None
 
 
 @router.get("/", dependencies=[Depends(require_admin)])
@@ -46,6 +62,8 @@ def get_settings():
     uf  = cfg.get("unifi", {})
     sc  = cfg.get("scan", {})
     ov  = cfg.get("openvas", {})
+    gs  = cfg.get("git_sync", {})
+    up  = cfg.get("updates", {})
     return {
         "unifi": {
             "url": uf.get("url", ""),
@@ -68,6 +86,18 @@ def get_settings():
             "port": ov.get("port", 9390),
             "username": ov.get("username", "admin"),
             "password": MASK if ov.get("password") else "",
+        },
+        "git_sync": {
+            "repo_url": gs.get("repo_url", ""),
+            "branch": gs.get("branch", ""),
+            "path": gs.get("path", ""),
+            "token": MASK if gs.get("token") else "",
+            "auto_sync": gs.get("auto_sync", True),
+        },
+        "updates": {
+            "repo": up.get("repo", ""),
+            "portainer_connection": up.get("portainer_connection", ""),
+            "stack_id": up.get("stack_id"),
         },
     }
 
@@ -109,6 +139,25 @@ def save_settings(payload: SettingsIn):
         if o.password and o.password != MASK:
             ov["password"] = encrypt(o.password)
         cfg["openvas"] = ov
+
+    if payload.git_sync is not None:
+        gs = cfg.get("git_sync", {})
+        g = payload.git_sync
+        gs["repo_url"]  = g.repo_url.strip().rstrip("/")
+        gs["branch"]    = g.branch.strip()
+        gs["path"]      = g.path.strip().strip("/")
+        gs["auto_sync"] = g.auto_sync
+        if g.token and g.token != MASK:
+            gs["token"] = encrypt(g.token.strip())
+        cfg["git_sync"] = gs
+
+    if payload.updates is not None:
+        u = payload.updates
+        cfg["updates"] = {
+            "repo": u.repo.strip().strip("/"),
+            "portainer_connection": u.portainer_connection,
+            "stack_id": u.stack_id,
+        }
 
     write_config(cfg)
     return {"status": "saved"}

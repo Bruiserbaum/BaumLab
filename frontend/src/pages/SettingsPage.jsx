@@ -14,6 +14,9 @@ const MASK = '••••••••'
 const blankUnifi   = { url: '', username: '', password: '', api_key: '', site: 'default', verify_ssl: false, controller_type: 'classic' }
 const blankScan    = { default_cidr: '192.168.1.0/24', auto_scan: false, auto_scan_interval_minutes: 60 }
 const blankOpenVas = { socket_path: '/var/run/gvmd/gvmd.sock', host: '', port: 9390, username: 'admin', password: '' }
+const blankGitSync = { repo_url: '', branch: '', path: '', token: '', auto_sync: true }
+const blankUpdates = { repo: '', portainer_connection: '', stack_id: null }
+const UPDATE_TIMEOUT_MS = 15 * 60_000
 
 export default function SettingsPage() {
   const { isAdmin } = useAuth()
@@ -29,6 +32,16 @@ export default function SettingsPage() {
   const [testing, setTesting]   = useState(false)
   const [ovTest, setOvTest]     = useState(null)
   const [ovTesting, setOvTesting] = useState(false)
+  const [gitSync, setGitSync]   = useState(blankGitSync)
+  const [gitTest, setGitTest]   = useState(null)
+  const [gitTesting, setGitTesting] = useState(false)
+  const [updates, setUpdates]   = useState(blankUpdates)
+  const [updStatus, setUpdStatus] = useState(null)
+  const [updMsg, setUpdMsg]     = useState(null)
+  const [checking, setChecking] = useState(false)
+  const [applying, setApplying] = useState(false)
+  const [connections, setConnections] = useState([])
+  const [stacks, setStacks]     = useState([])
 
   useEffect(() => {
     if (!isAdmin) return
@@ -36,9 +49,76 @@ export default function SettingsPage() {
       if (data.unifi)   setUnifi({ ...blankUnifi, ...data.unifi })
       if (data.scan)    setScan({ ...blankScan, ...data.scan })
       if (data.openvas) setOpenVas({ ...blankOpenVas, ...data.openvas })
+      if (data.git_sync) setGitSync({ ...blankGitSync, ...data.git_sync })
+      if (data.updates) {
+        setUpdates({ ...blankUpdates, ...data.updates })
+        if (data.updates.portainer_connection) loadStacks(data.updates.portainer_connection)
+      }
       setLoading(false)
     })
+    api('/api/updates/status').then(r => r.ok ? r.json() : null).then(setUpdStatus)
+    api('/api/portainer/connections').then(r => r.ok ? r.json() : []).then(setConnections)
   }, [isAdmin])
+
+  async function loadStacks(connection) {
+    setStacks([])
+    if (!connection) return
+    const r = await api(`/api/updates/stacks?connection=${encodeURIComponent(connection)}`)
+    const data = await r.json().catch(() => [])
+    if (r.ok) setStacks(data)
+    else setUpdMsg({ ok: false, msg: data.detail || `Could not list stacks (HTTP ${r.status})` })
+  }
+
+  async function checkUpdates() {
+    setChecking(true); setUpdMsg(null)
+    const r = await api('/api/updates/check', { method: 'POST' })
+    const data = await r.json().catch(() => ({}))
+    if (r.ok) setUpdStatus(data)
+    else setUpdMsg({ ok: false, msg: data.detail || `HTTP ${r.status}` })
+    setChecking(false)
+  }
+
+  async function applyUpdate() {
+    const tag = updStatus?.latest_tag
+    if (!confirm(`Update BaumLab to ${tag}?\n\nPortainer will rebuild and restart the stack. BaumLab will be ` +
+                 `unavailable for a few minutes while the images build.`)) return
+    setApplying(true); setUpdMsg(null)
+    // Save the update settings first so the backend uses what's on screen
+    await api('/api/settings/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ updates }),
+    })
+    const r = await api('/api/updates/apply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tag }),
+    })
+    const data = await r.json().catch(() => ({}))
+    if (!r.ok) { setUpdMsg({ ok: false, msg: data.detail || `HTTP ${r.status}` }); setApplying(false); return }
+
+    setUpdMsg({ ok: true, msg: `Updating to ${tag} — Portainer is rebuilding. This page reloads when it's back.` })
+    const target = tag.replace(/^v/, '')
+    const started = Date.now()
+    const poll = setInterval(async () => {
+      if (Date.now() - started > UPDATE_TIMEOUT_MS) {
+        clearInterval(poll); setApplying(false)
+        setUpdMsg({ ok: false, msg: 'Still not on the new version after 15 minutes — check the stack in Portainer.' })
+        return
+      }
+      try {
+        const v = await (await fetch('/api/auth/version')).json()
+        if (v.version === target) { clearInterval(poll); window.location.reload(); return }
+        // Same container still answering — see if Portainer rejected the redeploy
+        const s = await api('/api/updates/status')
+        const st = s.ok ? await s.json() : null
+        if (st?.update_error) {
+          clearInterval(poll); setApplying(false); setUpdStatus(st)
+          setUpdMsg({ ok: false, msg: st.update_error })
+        }
+      } catch { /* API restarting — keep waiting */ }
+    }, 5000)
+  }
 
   async function save(e) {
     e.preventDefault()
@@ -46,7 +126,7 @@ export default function SettingsPage() {
     const r = await api('/api/settings/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ unifi, scan, openvas }),
+      body: JSON.stringify({ unifi, scan, openvas, git_sync: gitSync, updates }),
     })
     if (!r.ok) { setError((await r.json()).detail || 'Save failed'); return }
     setSaved(true)
@@ -56,6 +136,17 @@ export default function SettingsPage() {
     if (fresh.unifi)   setUnifi({ ...blankUnifi, ...fresh.unifi })
     if (fresh.scan)    setScan({ ...blankScan, ...fresh.scan })
     if (fresh.openvas) setOpenVas({ ...blankOpenVas, ...fresh.openvas })
+    if (fresh.git_sync) setGitSync({ ...blankGitSync, ...fresh.git_sync })
+  }
+
+  async function testGitSync() {
+    setGitTesting(true); setGitTest(null)
+    const r = await api('/api/git-sync/test', { method: 'POST' })
+    const data = await r.json().catch(() => ({}))
+    setGitTest(r.ok
+      ? { ok: true,  msg: `Connected — ${data.repo} (${data.branch || 'default branch'})${data.empty ? ', empty repo' : ''}` }
+      : { ok: false, msg: data.detail || `HTTP ${r.status}` })
+    setGitTesting(false)
   }
 
   async function testOpenVas() {
@@ -188,6 +279,113 @@ export default function SettingsPage() {
             {ovTest && (
               <span style={{ fontSize: 12, color: ovTest.ok ? 'var(--green)' : 'var(--red)' }}>
                 {ovTest.ok ? '✓' : '✗'} {ovTest.msg}
+              </span>
+            )}
+          </div>
+        </section>
+
+        {/* ── Git Sync ───────────────────────────────────────────── */}
+        <section className="card">
+          <h2 style={{ marginTop: 0, marginBottom: 4, fontSize: 15 }}>Git Sync (Forgejo / Gitea)</h2>
+          <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--text-muted)' }}>
+            Commits the Services inventory to a repo as <code>README.md</code>, <code>services.yaml</code> and
+            per-host pages. One-way — BaumLab overwrites those files. Token stored encrypted.
+          </p>
+
+          <Field label="Repository URL">
+            <input value={gitSync.repo_url} placeholder="https://git.example.com/owner/infra-map"
+              onChange={e => setGitSync(g => ({ ...g, repo_url: e.target.value }))} />
+          </Field>
+          <Field label="Access Token" hint="Forgejo → Settings → Applications, scope: repository (read & write)">
+            <input type="password" value={gitSync.token}
+              placeholder={gitSync.token === MASK ? 'Saved — enter new to change' : ''}
+              onChange={e => setGitSync(g => ({ ...g, token: e.target.value }))}
+              autoComplete="new-password" />
+          </Field>
+          <Field label="Branch" hint="Blank = repo default">
+            <input value={gitSync.branch} placeholder="main" style={{ width: 160 }}
+              onChange={e => setGitSync(g => ({ ...g, branch: e.target.value }))} />
+          </Field>
+          <Field label="Folder" hint="Blank = repo root">
+            <input value={gitSync.path} placeholder="services" style={{ width: 160 }}
+              onChange={e => setGitSync(g => ({ ...g, path: e.target.value }))} />
+          </Field>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 14 }}>
+            <input type="checkbox" checked={gitSync.auto_sync}
+              onChange={e => setGitSync(g => ({ ...g, auto_sync: e.target.checked }))} />
+            Auto-sync after each change (edits within 30 s are batched into one commit)
+          </label>
+
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button type="button" className="secondary" onClick={testGitSync} disabled={gitTesting}>
+              {gitTesting ? 'Testing…' : 'Test Connection'}
+            </button>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Uses saved settings — save first.</span>
+            {gitTest && (
+              <span style={{ fontSize: 12, color: gitTest.ok ? 'var(--green)' : 'var(--red)' }}>
+                {gitTest.ok ? '✓' : '✗'} {gitTest.msg}
+              </span>
+            )}
+          </div>
+        </section>
+
+        {/* ── Updates ────────────────────────────────────────────── */}
+        <section className="card">
+          <h2 style={{ marginTop: 0, marginBottom: 4, fontSize: 15 }}>Updates</h2>
+          <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--text-muted)' }}>
+            Checks GitHub release tags every 6 hours. Applying an update asks Portainer to redeploy
+            BaumLab's Git stack at the new tag — it rebuilds and restarts itself. Requires the stack to be
+            deployed from Git in Portainer, and a Portainer connection on the Docker page.
+          </p>
+
+          <div style={{ display: 'flex', gap: 16, alignItems: 'center', marginBottom: 14, fontSize: 13, flexWrap: 'wrap' }}>
+            <span>Running <b style={{ fontFamily: 'monospace' }}>v{updStatus?.current ?? version}</b></span>
+            {updStatus?.latest && (
+              <span style={{ color: updStatus.update_available ? 'var(--yellow)' : 'var(--green)' }}>
+                {updStatus.update_available ? `↑ ${updStatus.latest_tag} available` : '✓ Up to date'}
+              </span>
+            )}
+            {updStatus?.check_error && <span style={{ color: 'var(--red)', fontSize: 12 }}>✗ {updStatus.check_error}</span>}
+            <button type="button" className="secondary" onClick={checkUpdates} disabled={checking}>
+              {checking ? 'Checking…' : 'Check Now'}
+            </button>
+          </div>
+
+          <Field label="GitHub Repository" hint="Blank = Bruiserbaum/BaumLab; set your fork's owner/repo">
+            <input value={updates.repo} placeholder="Bruiserbaum/BaumLab"
+              onChange={e => setUpdates(u => ({ ...u, repo: e.target.value }))} />
+          </Field>
+          <Field label="Portainer Connection">
+            <select value={updates.portainer_connection}
+              onChange={e => {
+                const name = e.target.value
+                setUpdates(u => ({ ...u, portainer_connection: name, stack_id: null }))
+                loadStacks(name)
+              }}>
+              <option value="">— choose —</option>
+              {connections.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+            </select>
+          </Field>
+          <Field label="BaumLab Stack">
+            <select value={updates.stack_id ?? ''} disabled={!updates.portainer_connection}
+              onChange={e => setUpdates(u => ({ ...u, stack_id: e.target.value ? +e.target.value : null }))}>
+              <option value="">— choose —</option>
+              {stacks.map(s => (
+                <option key={s.id} value={s.id} disabled={!s.git_url}>
+                  {s.name}{s.git_url ? ` — ${s.git_url.replace(/^https?:\/\//, '')} @ ${s.reference || 'default'}` : ' (not from Git)'}
+                </option>
+              ))}
+            </select>
+          </Field>
+
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button type="button" onClick={applyUpdate}
+              disabled={applying || !updStatus?.update_available || !updates.portainer_connection || !updates.stack_id}>
+              {applying ? 'Updating…' : `Apply Update${updStatus?.update_available ? ` (${updStatus.latest_tag})` : ''}`}
+            </button>
+            {updMsg && (
+              <span style={{ fontSize: 12, color: updMsg.ok ? 'var(--green)' : 'var(--red)' }}>
+                {updMsg.ok ? '⟳' : '✗'} {updMsg.msg}
               </span>
             )}
           </div>
