@@ -85,6 +85,16 @@ A self-hosted home lab monitoring, mapping, and security dashboard. Discover eve
 - **Coverage**: every service shows whether it is protected and whether the last backup is fresh. Manual records cover backups made elsewhere (Unraid, Proxmox, NAS snapshots)
 - **Import** an existing BaumLabBackup database (destinations, jobs, stacks)
 
+### Launchpad
+- **Links page built from the Services inventory**: tiles grouped by category with icons and live up/down dots, so it never drifts from what you actually run. Hidden or decommissioned services drop off automatically.
+- **Bookmarks** for links that aren't services (router UI, cloud consoles, docs)
+- **Icon library**: search [Dashboard Icons](https://github.com/homarr-labs/dashboard-icons) (about 2,000 home lab app icons, searchable by alias) or upload your own. Icons you pick are stored in BaumLab, so they work offline. **Auto-assign** matches icons to everything by name.
+- **Import from Heimdall**: reads Heimdall's links and icons straight from its container, then attaches them to matching services, creates services or adds bookmarks (review before import)
+- **Drag-and-drop layout**: reorder tiles, move them between groups, reorder groups
+- **Home page** at `/home`: a full-screen start page. Signed in, you see every tile. Visitors who aren't signed in see only tiles you mark 🌐 public (off by default). Behind Authentik, the proxy must let `/home`, `/assets`, `/api/launchpad/public` and `/api/icons/file` through for that.
+- **Export / import** the whole Launchpad (icons, layout and public flags included) as one JSON file
+- Search with `/`; Enter opens the first match
+
 ### Dashboard
 - **Home page** with tiles for monitors, services, backups, certificates, devices, Docker and BaumLab version, each linking to its section
 - **Needs attention**: monitors down, failing or stale backups, expiring certificates, public services without SSO, crash-looping containers, available updates

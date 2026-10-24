@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useApi, useAuth } from '../auth'
 import DiscoverPanel from './DiscoverPanel'
+import IconPicker, { AppIcon } from '../components/IconPicker'
 
 const API = '/api'
 const PROTOCOLS = ['http', 'https', 'tcp', 'udp']
@@ -18,6 +19,7 @@ const blankExtras = { monitor: true, vault: false, vault_username: '', vault_sec
 const blank = {
   name: '', status: 'active', category: '', host: '', platform: '', ip: '', port: '', protocol: 'http',
   vlan: '', url: '', proxied: false, sso: false, external: false, monitor_id: '', credential_ref: '', notes: '',
+  icon: '', launchpad: true,
 }
 
 // Each group-by option maps a service to the label of the group it belongs in
@@ -165,6 +167,7 @@ export default function ServicesPage() {
   const [showDiscover, setShowDiscover] = useState(false)
   const [extras, setExtras]       = useState(blankExtras)   // pieces created along with a new service
   const [notice, setNotice]       = useState(null)
+  const [pickingIcon, setPickingIcon] = useState(false)
   const [backups, setBackups]     = useState({})     // service id → { status, sources } from /api/backups/coverage
   const navigate = useNavigate()
 
@@ -259,7 +262,7 @@ export default function ServicesPage() {
       vlan:       form.vlan !== '' ? +form.vlan : null,
       monitor_id: form.monitor_id !== '' ? +form.monitor_id : null,
     }
-    for (const k of ['category', 'host', 'platform', 'ip', 'url', 'credential_ref', 'notes']) {
+    for (const k of ['category', 'host', 'platform', 'ip', 'url', 'credential_ref', 'notes', 'icon']) {
       body[k] = body[k]?.trim() || null
     }
     const isNew = editId == null
@@ -495,7 +498,18 @@ export default function ServicesPage() {
             <Check label="Behind reverse proxy" checked={form.proxied} onChange={v => setForm(x => ({ ...x, proxied: v }))} />
             <Check label="Behind SSO (Authentik)" checked={form.sso} onChange={v => setForm(x => ({ ...x, sso: v }))} />
             <Check label="Internet-facing" checked={form.external} onChange={v => setForm(x => ({ ...x, external: v }))} />
+            <span style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' }}>
+              <AppIcon icon={form.icon} name={form.name} size={28} />
+              <button type="button" className="secondary" onClick={() => setPickingIcon(true)}>
+                {form.icon ? 'Change icon' : 'Choose icon'}
+              </button>
+              <Check label="Show on Launchpad" checked={form.launchpad} onChange={v => setForm(x => ({ ...x, launchpad: v }))} />
+            </span>
           </div>
+          {pickingIcon && (
+            <IconPicker name={form.name} current={form.icon} onClose={() => setPickingIcon(false)}
+              onPick={icon => { setForm(x => ({ ...x, icon })); setPickingIcon(false) }} />
+          )}
           <Field label="External credentials — e.g. a Vaultwarden item link (use the Vault page to store passwords in BaumLab)">
             <input value={form.credential_ref} placeholder="https://vault.example.com/#/vault?itemId=…"
               style={{ width: '100%', boxSizing: 'border-box', marginBottom: 12 }}
@@ -607,6 +621,7 @@ export default function ServicesPage() {
                     </td>
                     <td>
                       <div style={{ fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <AppIcon icon={s.icon} name={s.name} size={20} />
                         <span style={isRetired ? { textDecoration: 'line-through' } : {}}>{s.name}</span>
                         {s.status !== 'active' && (
                           <span className={`badge badge-${isRetired ? 'gray' : 'yellow'}`}>{s.status}</span>
