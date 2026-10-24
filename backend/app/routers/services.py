@@ -1,11 +1,12 @@
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
-from ..models.service import Service, ServiceCreate, STATUSES
+from ..models.service import Service, ServiceCreate, ServiceNew, STATUSES
+from ..models.monitor import MonitorTarget
 from ..models.vault import VaultEntry
 from ..database import get_session
 from ..services.auth import get_current_user
-from ..services import git_sync
+from ..services import git_sync, discovery
 
 router = APIRouter(prefix="/api/services", tags=["services"], dependencies=[Depends(get_current_user)])
 
@@ -26,17 +27,54 @@ def list_services(session: Session = Depends(get_session)):
     return session.exec(select(Service).order_by(Service.name)).all()
 
 
-@router.post("/", response_model=Service)
-def create_service(data: ServiceCreate, session: Session = Depends(get_session)):
+def _attach_monitor(session: Session, service: Service):
+    """Create a monitor matching the service's address and link it."""
+    if not service.ip:
+        return
+    if service.port and service.protocol in ("http", "https", "tcp"):
+        protocol, port = service.protocol, service.port
+    else:
+        protocol, port = "icmp", None   # UDP or no port — ping the host instead
+    monitor = MonitorTarget(name=service.name, host=service.ip, port=port, protocol=protocol)
+    session.add(monitor)
+    session.flush()
+    service.monitor_id = monitor.id
+
+
+def _create(session: Session, data: ServiceNew) -> Service:
     _check_status(data.status)
-    service = Service(**data.model_dump())
+    service = Service(**data.model_dump(exclude={"create_monitor"}))
     if service.status == "decommissioned":
         service.decommissioned_at = datetime.utcnow()
+    if data.create_monitor and service.monitor_id is None:
+        _attach_monitor(session, service)
     session.add(service)
+    return service
+
+
+@router.post("/", response_model=Service)
+def create_service(data: ServiceNew, session: Session = Depends(get_session)):
+    service = _create(session, data)
     session.commit()
     session.refresh(service)
     git_sync.queue_change(f"Add {service.name}{_where(service)}")
     return service
+
+
+@router.get("/discover")
+def discover_services(session: Session = Depends(get_session)):
+    """Suggestions from Portainer containers and device port scans, minus existing services."""
+    return discovery.discover(session)
+
+
+@router.post("/bulk", response_model=list[Service])
+def create_services_bulk(items: list[ServiceNew], session: Session = Depends(get_session)):
+    services = [_create(session, data) for data in items]
+    session.commit()
+    for service in services:
+        session.refresh(service)
+        git_sync.queue_change(f"Add {service.name}{_where(service)}")
+    return services
 
 
 @router.patch("/{service_id}", response_model=Service)

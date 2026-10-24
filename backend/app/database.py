@@ -7,6 +7,7 @@ from .models import portainer as _portainer_models  # noqa: F401
 from .models import vuln_schedule as _vuln_schedule_models  # noqa: F401
 from .models import service as _service_models  # noqa: F401
 from .models import vault as _vault_models  # noqa: F401
+from .models import repo as _repo_models  # noqa: F401
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./data/baumlab.db")
 
@@ -30,6 +31,8 @@ def migrate_db():
         "ALTER TABLE service ADD COLUMN status TEXT NOT NULL DEFAULT 'active'",
         "ALTER TABLE service ADD COLUMN decommissioned_at DATETIME",
         "ALTER TABLE service ADD COLUMN credential_ref TEXT",
+        "ALTER TABLE containersnapshot ADD COLUMN host TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE containersnapshot ADD COLUMN ports TEXT NOT NULL DEFAULT ''",
     ]
     with engine.connect() as conn:
         for stmt in migrations:

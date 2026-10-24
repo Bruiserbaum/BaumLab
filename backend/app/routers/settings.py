@@ -48,12 +48,22 @@ class UpdatesIn(BaseModel):
     stack_id: Optional[int] = None    # Portainer stack BaumLab is deployed as
 
 
+class RepoSourceIn(BaseModel):
+    name: str
+    type: str = "github"              # github | github-enterprise | gitea (also Forgejo)
+    url: str = ""                     # base URL; ignored for github.com
+    owner: str = ""                   # optional: only this user/org
+    token: Optional[str] = None       # None or MASK = keep existing
+    orig_name: Optional[str] = None   # previous name, so a rename keeps its saved token
+
+
 class SettingsIn(BaseModel):
     unifi: Optional[UniFiIn] = None
     scan: Optional[ScanIn] = None
     openvas: Optional[OpenVasIn] = None
     git_sync: Optional[GitSyncIn] = None
     updates: Optional[UpdatesIn] = None
+    repo_sources: Optional[list[RepoSourceIn]] = None
 
 
 @router.get("/", dependencies=[Depends(require_admin)])
@@ -99,6 +109,16 @@ def get_settings():
             "portainer_connection": up.get("portainer_connection", ""),
             "stack_id": up.get("stack_id"),
         },
+        "repo_sources": [
+            {
+                "name": s.get("name", ""),
+                "type": s.get("type", "github"),
+                "url": s.get("url", ""),
+                "owner": s.get("owner", ""),
+                "token": MASK if s.get("token") else "",
+            }
+            for s in cfg.get("repo_sources", [])
+        ],
     }
 
 
@@ -158,6 +178,27 @@ def save_settings(payload: SettingsIn):
             "portainer_connection": u.portainer_connection,
             "stack_id": u.stack_id,
         }
+
+    if payload.repo_sources is not None:
+        old_tokens = {s.get("name"): s.get("token", "") for s in cfg.get("repo_sources", [])}
+        sources = []
+        for s in payload.repo_sources:
+            if not s.name.strip():
+                continue
+            if s.token and s.token != MASK:
+                token = encrypt(s.token.strip())
+            elif s.token == MASK:
+                token = old_tokens.get(s.orig_name or s.name, "")
+            else:
+                token = ""
+            sources.append({
+                "name": s.name.strip(),
+                "type": s.type if s.type in ("github", "github-enterprise", "gitea") else "github",
+                "url": s.url.strip().rstrip("/"),
+                "owner": s.owner.strip(),
+                "token": token,
+            })
+        cfg["repo_sources"] = sources
 
     write_config(cfg)
     return {"status": "saved"}

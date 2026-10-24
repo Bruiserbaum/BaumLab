@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useApi, useAuth } from '../auth'
+import DiscoverPanel from './DiscoverPanel'
 
 const API = '/api'
 const PROTOCOLS = ['http', 'https', 'tcp', 'udp']
@@ -11,6 +12,8 @@ const CATEGORY_SUGGESTIONS = [
   'Media', 'Home Automation', 'Infrastructure', 'Networking', 'Monitoring',
   'Security', 'Storage', 'Productivity', 'Development', 'Gaming',
 ]
+
+const blankExtras = { monitor: true, vault: false, vault_username: '', vault_secret: '' }
 
 const blank = {
   name: '', status: 'active', category: '', host: '', platform: '', ip: '', port: '', protocol: 'http',
@@ -152,6 +155,9 @@ export default function ServicesPage() {
   const [gitStatus, setGitStatus] = useState(null)
   const [syncing, setSyncing]     = useState(false)
   const [syncError, setSyncError] = useState('')
+  const [showDiscover, setShowDiscover] = useState(false)
+  const [extras, setExtras]       = useState(blankExtras)   // pieces created along with a new service
+  const [notice, setNotice]       = useState(null)
 
   async function loadServices() {
     const r = await api(`${API}/services/`)
@@ -172,10 +178,14 @@ export default function ServicesPage() {
     loadGitStatus()
   }
 
+  function loadDevices() {
+    api(`${API}/devices/`).then(r => r.ok ? r.json() : []).then(setDevices).catch(() => {})
+  }
+
   async function load() {
     await loadServices()
     // Supporting data is best-effort — the page still works without it
-    api(`${API}/devices/`).then(r => r.ok ? r.json() : []).then(setDevices).catch(() => {})
+    loadDevices()
     api(`${API}/monitors/`).then(r => r.ok ? r.json() : []).then(setMonitors).catch(() => {})
     if (isAdmin) {
       api(`${API}/vault/`).then(r => r.ok ? r.json() : []).then(entries => {
@@ -206,7 +216,9 @@ export default function ServicesPage() {
   function openAdd() {
     setEditId(null)
     setForm(blank)
+    setExtras(blankExtras)
     setShowForm(true)
+    setShowDiscover(false)
   }
 
   function openEdit(s) {
@@ -240,13 +252,37 @@ export default function ServicesPage() {
     for (const k of ['category', 'host', 'platform', 'ip', 'url', 'credential_ref', 'notes']) {
       body[k] = body[k]?.trim() || null
     }
-    await api(editId != null ? `${API}/services/${editId}` : `${API}/services/`, {
-      method: editId != null ? 'PATCH' : 'POST',
+    const isNew = editId == null
+    if (isNew) body.create_monitor = extras.monitor && !body.monitor_id && !!body.ip
+    const r = await api(isNew ? `${API}/services/` : `${API}/services/${editId}`, {
+      method: isNew ? 'POST' : 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
+    if (!r.ok) {
+      setNotice({ ok: false, text: (await r.json().catch(() => ({}))).detail || `Save failed (HTTP ${r.status})` })
+      return
+    }
+    const saved = await r.json()
+    const done = [isNew ? `Added ${saved.name}` : `Saved ${saved.name}`]
+    if (body.create_monitor && saved.monitor_id) done.push('monitor created')
+
+    // The vault has its own admin + safety checks, so it's a separate call; the service is kept either way
+    if (isNew && extras.vault && extras.vault_secret) {
+      const v = await api(`${API}/vault/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          service_id: saved.id, title: `${saved.name} login`, username: extras.vault_username.trim() || null,
+          secret: extras.vault_secret, url: saved.url || directUrl(saved),
+        }),
+      })
+      if (v.ok) done.push('credentials saved to vault')
+      else done.push(`vault entry failed: ${(await v.json().catch(() => ({}))).detail || `HTTP ${v.status}`}`)
+    }
+    setNotice({ ok: !done.some(d => d.includes('failed')), text: done.join(' · ') })
     cancelForm()
-    await loadServices()
+    await load()
   }
 
   async function remove(id) {
@@ -321,6 +357,9 @@ export default function ServicesPage() {
         <button onClick={showForm && editId == null ? cancelForm : openAdd}>
           {showForm && editId == null ? 'Cancel' : '+ Add Service'}
         </button>
+        <button className="secondary" onClick={() => { setShowDiscover(v => !v); setShowForm(false) }}>
+          🔍 Discover
+        </button>
         <input placeholder="Search…" value={search} onChange={e => setSearch(e.target.value)} style={{ width: 200 }} />
         <span style={{ fontSize: 13, color: 'var(--text-muted)', marginLeft: 8 }}>Group by</span>
         <select value={groupBy} onChange={e => changeGroup(e.target.value)}>
@@ -363,6 +402,24 @@ export default function ServicesPage() {
           </button>
         </div>
       </div>
+
+      {notice && (
+        <div style={{ fontSize: 12, marginBottom: 12, padding: '8px 12px', borderRadius: 6,
+          display: 'flex', justifyContent: 'space-between',
+          color: notice.ok ? 'var(--green)' : 'var(--red)',
+          border: `1px solid ${notice.ok ? 'var(--green)' : 'var(--red)'}`,
+          background: notice.ok ? '#1a2e1a' : '#2e1a1a' }}>
+          {notice.ok ? '✓' : '✗'} {notice.text}
+          <span style={{ cursor: 'pointer' }} onClick={() => setNotice(null)}>✕</span>
+        </div>
+      )}
+
+      {showDiscover && (
+        <DiscoverPanel api={api} devices={devices} categories={categories}
+          onClose={() => setShowDiscover(false)}
+          onDevicesChanged={loadDevices}
+          onAdded={n => { setShowDiscover(false); setNotice({ ok: true, text: `Added ${n} service${n !== 1 ? 's' : ''} from discovery — review and edit them below` }); load() }} />
+      )}
 
       {/* ── Add / Edit form ────────────────────────────────────── */}
       {showForm && (
@@ -434,6 +491,33 @@ export default function ServicesPage() {
             <input value={form.notes} style={{ width: '100%', boxSizing: 'border-box', marginBottom: 12 }}
               onChange={e => setForm(x => ({ ...x, notes: e.target.value }))} />
           </Field>
+          {editId == null && (
+            <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12, marginBottom: 12 }}>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>ALSO CREATE</div>
+              <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+                <span title={form.monitor_id ? 'A monitor is already linked' : !form.ip ? 'Needs an IP address' : ''}>
+                  <Check label="Health monitor for this IP / port" checked={extras.monitor && !form.monitor_id && !!form.ip}
+                    onChange={v => setExtras(x => ({ ...x, monitor: v }))} />
+                </span>
+                {isAdmin && (
+                  <Check label="Vault entry with login" checked={extras.vault}
+                    onChange={v => setExtras(x => ({ ...x, vault: v }))} />
+                )}
+              </div>
+              {isAdmin && extras.vault && (
+                <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+                  <Field label="Username">
+                    <input value={extras.vault_username} autoComplete="off"
+                      onChange={e => setExtras(x => ({ ...x, vault_username: e.target.value }))} />
+                  </Field>
+                  <Field label="Password">
+                    <input type="password" value={extras.vault_secret} autoComplete="new-password" style={{ width: 220 }}
+                      onChange={e => setExtras(x => ({ ...x, vault_secret: e.target.value }))} />
+                  </Field>
+                </div>
+              )}
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 8 }}>
             <button type="submit">{editId != null ? 'Save' : 'Add'}</button>
             <button type="button" className="secondary" onClick={cancelForm}>Cancel</button>
@@ -450,7 +534,8 @@ export default function ServicesPage() {
       {/* ── Grouped tables ─────────────────────────────────────── */}
       {services.length === 0 && (
         <div className="card" style={{ color: 'var(--text-muted)', textAlign: 'center' }}>
-          No services yet. Click “+ Add Service” to start your inventory.
+          No services yet. Click “🔍 Discover” to pull suggestions from Docker and your port scans,
+          or “+ Add Service” to add one by hand.
         </div>
       )}
       {services.length > 0 && filtered.length === 0 && (

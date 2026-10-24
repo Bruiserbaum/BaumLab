@@ -16,6 +16,13 @@ const blankScan    = { default_cidr: '192.168.1.0/24', auto_scan: false, auto_sc
 const blankOpenVas = { socket_path: '/var/run/gvmd/gvmd.sock', host: '', port: 9390, username: 'admin', password: '' }
 const blankGitSync = { repo_url: '', branch: '', path: '', token: '', auto_sync: true }
 const blankUpdates = { repo: '', portainer_connection: '', stack_id: null }
+const blankRepoSource = { name: '', type: 'github', url: '', owner: '', token: '', orig_name: null }
+const REPO_TYPES = [
+  ['github', 'GitHub.com'],
+  ['github-enterprise', 'GitHub Enterprise'],
+  ['gitea', 'Gitea / Forgejo'],
+]
+const withOrigName = sources => (sources || []).map(s => ({ ...blankRepoSource, ...s, orig_name: s.name }))
 const UPDATE_TIMEOUT_MS = 15 * 60_000
 
 export default function SettingsPage() {
@@ -42,6 +49,7 @@ export default function SettingsPage() {
   const [applying, setApplying] = useState(false)
   const [connections, setConnections] = useState([])
   const [stacks, setStacks]     = useState([])
+  const [repoSources, setRepoSources] = useState([])
 
   useEffect(() => {
     if (!isAdmin) return
@@ -50,6 +58,7 @@ export default function SettingsPage() {
       if (data.scan)    setScan({ ...blankScan, ...data.scan })
       if (data.openvas) setOpenVas({ ...blankOpenVas, ...data.openvas })
       if (data.git_sync) setGitSync({ ...blankGitSync, ...data.git_sync })
+      setRepoSources(withOrigName(data.repo_sources))
       if (data.updates) {
         setUpdates({ ...blankUpdates, ...data.updates })
         if (data.updates.portainer_connection) loadStacks(data.updates.portainer_connection)
@@ -126,7 +135,7 @@ export default function SettingsPage() {
     const r = await api('/api/settings/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ unifi, scan, openvas, git_sync: gitSync, updates }),
+      body: JSON.stringify({ unifi, scan, openvas, git_sync: gitSync, updates, repo_sources: repoSources }),
     })
     if (!r.ok) { setError((await r.json()).detail || 'Save failed'); return }
     setSaved(true)
@@ -137,6 +146,7 @@ export default function SettingsPage() {
     if (fresh.scan)    setScan({ ...blankScan, ...fresh.scan })
     if (fresh.openvas) setOpenVas({ ...blankOpenVas, ...fresh.openvas })
     if (fresh.git_sync) setGitSync({ ...blankGitSync, ...fresh.git_sync })
+    setRepoSources(withOrigName(fresh.repo_sources))
   }
 
   async function testGitSync() {
@@ -327,6 +337,57 @@ export default function SettingsPage() {
               </span>
             )}
           </div>
+        </section>
+
+        {/* ── Repository sources ─────────────────────────────────── */}
+        <section className="card">
+          <h2 style={{ marginTop: 0, marginBottom: 4, fontSize: 15 }}>Repository Sources</h2>
+          <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--text-muted)' }}>
+            Git hosts shown on the Repositories page. Use a read-only token — it lists everything the token
+            can see, private repos included. Without a token, set an owner to list their public repos.
+          </p>
+
+          {repoSources.map((s, i) => {
+            const set = patch => setRepoSources(list => list.map((x, j) => j === i ? { ...x, ...patch } : x))
+            return (
+              <div key={i} style={{ borderTop: '1px solid var(--border)', paddingTop: 12, marginBottom: 12 }}>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <Field label="Name">
+                    <input value={s.name} placeholder="GitHub" onChange={e => set({ name: e.target.value })} />
+                  </Field>
+                  <Field label="Type">
+                    <select value={s.type} onChange={e => set({ type: e.target.value })}>
+                      {REPO_TYPES.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+                    </select>
+                  </Field>
+                </div>
+                {s.type !== 'github' && (
+                  <Field label="Base URL">
+                    <input value={s.url} placeholder={s.type === 'gitea' ? 'https://git.example.com' : 'https://github.example.com'}
+                      onChange={e => set({ url: e.target.value })} />
+                  </Field>
+                )}
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <Field label="Owner" hint="optional filter">
+                    <input value={s.owner} placeholder="user or org" onChange={e => set({ owner: e.target.value })} />
+                  </Field>
+                  <Field label="Token" hint={s.type === 'gitea' ? 'scope: read repository' : 'fine-grained, read-only'}>
+                    <input type="password" value={s.token} autoComplete="new-password"
+                      placeholder={s.token === MASK ? 'Saved — enter new to change' : ''}
+                      onChange={e => set({ token: e.target.value })} />
+                  </Field>
+                </div>
+                <button type="button" className="secondary" style={{ color: 'var(--red)' }}
+                  onClick={() => setRepoSources(list => list.filter((_, j) => j !== i))}>
+                  Remove
+                </button>
+              </div>
+            )
+          })}
+          <button type="button" className="secondary"
+            onClick={() => setRepoSources(list => [...list, { ...blankRepoSource }])}>
+            + Add source
+          </button>
         </section>
 
         {/* ── Updates ────────────────────────────────────────────── */}
