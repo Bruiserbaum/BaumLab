@@ -15,3 +15,5 @@ class ContainerSnapshot(SQLModel, table=True):
     image: str = ""
     state: str = ""          # running / exited / dead / restarting / paused / created
     status_text: str = ""    # human-readable e.g. "Exited (1) 2 hours ago"
+    host: str = ""           # Docker host address (from the endpoint URL)
+    ports: str = ""          # JSON list of published ports [{"public", "private", "proto"}]

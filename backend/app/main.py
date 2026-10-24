@@ -14,7 +14,7 @@ from .services.monitor import run_check
 from .services.auth import hash_password
 from .routers import devices, monitors, scan, unifi, auth, users, settings, external_scan, status, advanced_scan, vuln_scan, services
 from .routers import syslog as syslog_router, portainer as portainer_router, git_sync as git_sync_router
-from .routers import vault as vault_router, updates as updates_router
+from .routers import vault as vault_router, updates as updates_router, tools as tools_router
 from .services import git_sync, updater
 from .services.config_service import read_config, decrypt
 from .services.syslog_listener import start_syslog_listener
@@ -193,6 +193,7 @@ app.include_router(portainer_router.router)
 app.include_router(git_sync_router.router)
 app.include_router(vault_router.router)
 app.include_router(updates_router.router)
+app.include_router(tools_router.router)
 
 
 @app.get("/api/health")

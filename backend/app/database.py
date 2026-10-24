@@ -30,6 +30,8 @@ def migrate_db():
         "ALTER TABLE service ADD COLUMN status TEXT NOT NULL DEFAULT 'active'",
         "ALTER TABLE service ADD COLUMN decommissioned_at DATETIME",
         "ALTER TABLE service ADD COLUMN credential_ref TEXT",
+        "ALTER TABLE containersnapshot ADD COLUMN host TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE containersnapshot ADD COLUMN ports TEXT NOT NULL DEFAULT ''",
     ]
     with engine.connect() as conn:
         for stmt in migrations:

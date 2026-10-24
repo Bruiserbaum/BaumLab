@@ -14,4 +14,5 @@ mac-vendor-lookup==0.1.12 # MAC OUI → vendor name
 icmplib==3.0.4            # Pure-Python ICMP ping (no subprocess)
 pyotp==2.9.0              # TOTP / HOTP for Google Authenticator MFA
 qrcode==7.4.2             # QR code generation (SVG, no Pillow needed)
+argon2-cffi==23.1.0       # Argon2id hashes for the Vaultwarden ADMIN_TOKEN tool
 # GMP client is implemented directly (see services/openvas.py) — no python-gvm dependency needed

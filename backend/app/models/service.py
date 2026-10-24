@@ -46,3 +46,8 @@ class ServiceCreate(SQLModel):
     monitor_id: Optional[int] = None
     credential_ref: Optional[str] = None
     notes: Optional[str] = None
+
+
+class ServiceNew(ServiceCreate):
+    """Create-only options for the pieces that come with a service."""
+    create_monitor: bool = False      # also add a health monitor for ip:port

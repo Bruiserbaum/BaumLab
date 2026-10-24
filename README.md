@@ -24,6 +24,8 @@ A self-hosted home lab monitoring, mapping, and security dashboard. Discover eve
 - **Access flags** — behind reverse proxy, behind SSO (Authentik), internet-facing; highlights public services without SSO
 - **Group by** category, host, VLAN, platform, or access type, with search
 - **Device & monitor linking** — IP suggestions (and VLAN auto-fill) from discovered devices; link a monitor to show live up/down
+- **Discovery** — suggests services from running Docker containers (via Portainer) and device port scans; review, edit and add in bulk
+- **Linked pieces** — creating a service can also create its health monitor and a vault entry for its login
 - **Lifecycle status** — active / planned / decommissioned (with date), so retired services stay in the history
 - **Credentials pointer** — link each service to its Vaultwarden item (BaumLab never stores the secret)
 - **Export to PDF** — printer-friendly inventory with check-off boxes for auditing what you actually have running
@@ -73,6 +75,12 @@ A self-hosted home lab monitoring, mapping, and security dashboard. Discover eve
 - **OpenVAS** — socket path or host/port, credentials; test connection button
 - **Git Sync** — Forgejo / Gitea repo URL, token, branch, folder, auto-sync toggle; test connection button
 - **Updates** — check GitHub for new releases and apply them through Portainer (see [Updates](#updates))
+
+### Tools
+- **Secret keys** — hex-32, base64url, JWT hex-48, database passwords (compose-safe), alphanumeric keys, UUIDs; generated in the browser
+- **Vaultwarden admin token** — Argon2id PHC string (OWASP preset) plus the login password, with a docker-compose-escaped variant
+- **htpasswd (bcrypt)**, **WireGuard keypairs**, **subnet calculator**, **base64 / JWT decoder**
+- **Save to Vault** — store any generated key in the vault with its purpose
 
 ### Credential Vault
 - **Encrypted password store** linked to services: reveal, copy, generate, encrypted notes
