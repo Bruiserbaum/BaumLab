@@ -3,14 +3,18 @@ version: "3.9"
 services:
   api:
     build: ./backend
+    # Always rebuild on `up` so a Portainer Git redeploy (Settings → Updates) picks up new code
+    pull_policy: build
     container_name: baumlab-api
     restart: unless-stopped
     ports:
       - "${API_PORT:-8100}:8000"
       - "${SYSLOG_PORT:-514}:514/udp"   # Syslog receiver (UDP)
     volumes:
-      - ./data:/app/data          # SQLite database + persistent state
-      - ./config:/app/config      # User config (credentials, scan ranges, etc.)
+      # Portainer Git stacks: set these to absolute host paths — Portainer CE resolves
+      # relative paths inside its own compose folder, not your clone
+      - ${BAUMLAB_DATA_PATH:-./data}:/app/data          # SQLite database + persistent state
+      - ${BAUMLAB_CONFIG_PATH:-./config}:/app/config    # User config (credentials, scan ranges, etc.)
       - gvmd-socket:/var/run/gvmd # Shared gvmd Unix socket from OpenVAS
     # Set these in Portainer → Stack → Environment Variables (or in a local .env file)
     # Required: SECRET_KEY, ADMIN_PASSWORD
@@ -26,6 +30,10 @@ services:
       - TOKEN_EXPIRE_HOURS=${TOKEN_EXPIRE_HOURS:-8}
       # Authentik forward auth (NPM header-based auto-login) — see BaumDocker/authentik/README
       - AUTHENTIK_HEADER_AUTH=${AUTHENTIK_HEADER_AUTH:-false}
+      # Shared secret NPM sends as X-BaumLab-Proxy-Secret — required for the vault when header auth is on
+      - AUTHENTIK_PROXY_SECRET=${AUTHENTIK_PROXY_SECRET:-}
+      # Credential vault encryption key (falls back to SECRET_KEY). Back it up — losing it loses the vault.
+      - VAULT_KEY=${VAULT_KEY:-}
       # Authentik SSO (OIDC) — uncomment and fill in .env to enable
       # - OIDC_ENABLED=${OIDC_ENABLED:-false}
       # - OIDC_ISSUER=${OIDC_ISSUER}
@@ -46,6 +54,7 @@ services:
 
   frontend:
     build: ./frontend
+    pull_policy: build
     container_name: baumlab-ui
     restart: unless-stopped
     ports:

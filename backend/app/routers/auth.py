@@ -25,6 +25,8 @@ from ..services.auth import (
     get_current_user,
     SECRET_KEY,
     ALGORITHM,
+    HEADER_AUTH_ENABLED,
+    PROXY_SECRET,
 )
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -37,7 +39,11 @@ def version():
 
 # ── OIDC config ───────────────────────────────────────────────────────────────
 _OIDC_ENABLED           = os.getenv("OIDC_ENABLED", "false").lower() == "true"
-_HEADER_AUTH_ENABLED    = os.getenv("AUTHENTIK_HEADER_AUTH", "false").lower() == "true"
+_HEADER_AUTH_ENABLED    = HEADER_AUTH_ENABLED
+if _HEADER_AUTH_ENABLED and not PROXY_SECRET:
+    print("WARNING: AUTHENTIK_HEADER_AUTH is on without AUTHENTIK_PROXY_SECRET — anyone who can reach "
+          "BaumLab's ports directly can log in by forging the X-authentik-username header. "
+          "The credential vault stays locked until the secret is set.")
 _OIDC_ISSUER        = os.getenv("OIDC_ISSUER", "").rstrip("/") + "/"
 _OIDC_CLIENT_ID     = os.getenv("OIDC_CLIENT_ID", "")
 _OIDC_CLIENT_SECRET = os.getenv("OIDC_CLIENT_SECRET", "")
@@ -190,6 +196,10 @@ def header_login(request: Request, session: Session = Depends(get_session)):
     creating a user account on first visit. Requires AUTHENTIK_HEADER_AUTH=true."""
     if not _HEADER_AUTH_ENABLED:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Header auth is not enabled")
+    if PROXY_SECRET and not secrets.compare_digest(
+        request.headers.get("X-BaumLab-Proxy-Secret", "").encode(), PROXY_SECRET.encode()
+    ):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Request did not come through the trusted proxy")
     username = request.headers.get("X-authentik-username", "").strip()
     if not username:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="No Authentik header present")

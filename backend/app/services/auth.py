@@ -15,6 +15,12 @@ from ..models.user import User
 SECRET_KEY = os.getenv("SECRET_KEY", "change-me-in-production")
 ALGORITHM = "HS256"
 TOKEN_EXPIRE_HOURS = int(os.getenv("TOKEN_EXPIRE_HOURS", "8"))
+DEFAULT_SECRET_KEY = SECRET_KEY == "change-me-in-production"
+
+# Authentik forward-auth header login. The proxy secret proves a request really came
+# through NPM — without it, anyone who can reach the UI/API ports can forge the header.
+HEADER_AUTH_ENABLED = os.getenv("AUTHENTIK_HEADER_AUTH", "false").lower() == "true"
+PROXY_SECRET = os.getenv("AUTHENTIK_PROXY_SECRET", "").strip()
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")

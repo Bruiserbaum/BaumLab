@@ -5,6 +5,8 @@ import os
 from .models import syslog as _syslog_models   # noqa: F401
 from .models import portainer as _portainer_models  # noqa: F401
 from .models import vuln_schedule as _vuln_schedule_models  # noqa: F401
+from .models import service as _service_models  # noqa: F401
+from .models import vault as _vault_models  # noqa: F401
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./data/baumlab.db")
 
@@ -25,6 +27,9 @@ def migrate_db():
         "ALTER TABLE user ADD COLUMN totp_enabled BOOLEAN NOT NULL DEFAULT 0",
         "ALTER TABLE user ADD COLUMN oidc_sub TEXT",
         "CREATE INDEX IF NOT EXISTS ix_user_oidc_sub ON user (oidc_sub)",
+        "ALTER TABLE service ADD COLUMN status TEXT NOT NULL DEFAULT 'active'",
+        "ALTER TABLE service ADD COLUMN decommissioned_at DATETIME",
+        "ALTER TABLE service ADD COLUMN credential_ref TEXT",
     ]
     with engine.connect() as conn:
         for stmt in migrations:

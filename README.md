@@ -19,6 +19,16 @@ A self-hosted home lab monitoring, mapping, and security dashboard. Discover eve
 - **VLAN colour coding** — up to 6 colours distinguish network segments at a glance
 - **UniFi enrichment** — overlays UniFi client/device data (signal strength, model) onto discovered hosts
 
+### Service Inventory
+- **Track every self-hosted service** — host, platform (Docker/VM/LXC/bare metal), IP, port, protocol, VLAN, access URL, notes
+- **Access flags** — behind reverse proxy, behind SSO (Authentik), internet-facing; highlights public services without SSO
+- **Group by** category, host, VLAN, platform, or access type, with search
+- **Device & monitor linking** — IP suggestions (and VLAN auto-fill) from discovered devices; link a monitor to show live up/down
+- **Lifecycle status** — active / planned / decommissioned (with date), so retired services stay in the history
+- **Credentials pointer** — link each service to its Vaultwarden item (BaumLab never stores the secret)
+- **Export to PDF** — printer-friendly inventory with check-off boxes for auditing what you actually have running
+- **Git sync (Forgejo / Gitea)** — commits `README.md`, `services.yaml` and per-host pages to an infra repo; every add/change/decommission becomes a descriptive commit (edits within 30 s are batched)
+
 ### Service Monitors
 - **Continuous health checks** — ICMP ping, raw TCP connect, HTTP/HTTPS status checks
 - **Per-target intervals** — configure each monitor independently (seconds granularity)
@@ -61,6 +71,12 @@ A self-hosted home lab monitoring, mapping, and security dashboard. Discover eve
 - **UniFi** — URL, credentials, site, controller type, SSL verification; test connection button
 - **Scan** — default CIDR ranges, auto-scan toggle and interval
 - **OpenVAS** — socket path or host/port, credentials; test connection button
+- **Git Sync** — Forgejo / Gitea repo URL, token, branch, folder, auto-sync toggle; test connection button
+- **Updates** — check GitHub for new releases and apply them through Portainer (see [Updates](#updates))
+
+### Credential Vault
+- **Encrypted password store** linked to services: reveal, copy, generate, encrypted notes
+- **Admin-only with audit log**; locks itself if the deployment isn't safe for secrets (see [Credential Vault](#credential-vault))
 
 ---
 
@@ -127,6 +143,9 @@ docker compose up -d
 | `OIDC_CLIENT_SECRET` | — | OAuth2 client secret from Authentik |
 | `OIDC_REDIRECT_URI` | — | Full callback URL — `http://your-server:8100/api/auth/oidc/callback` |
 | `OIDC_FRONTEND_URL` | *(empty)* | Only needed when API and frontend are on different ports with no shared proxy |
+| `AUTHENTIK_HEADER_AUTH` | `false` | Log in from NPM forward-auth headers |
+| `AUTHENTIK_PROXY_SECRET` | — | Shared secret NPM must send as `X-BaumLab-Proxy-Secret`; **required with header auth** |
+| `VAULT_KEY` | *(SECRET_KEY)* | Credential vault encryption key — back it up |
 
 ### `config/config.yaml`
 
@@ -165,6 +184,40 @@ BaumLab supports OIDC login via Authentik. When enabled, a **Login with Authenti
 4. Rebuild and restart: `docker compose up -d --build`
 
 First-time SSO users get a local account created automatically. OIDC users cannot log in with a password — their account is linked to the Authentik subject ID.
+
+### Forward-auth header login (NPM)
+
+With `AUTHENTIK_HEADER_AUTH=true`, BaumLab logs users in from the `X-authentik-username` header that NPM adds after Authentik approves the request. BaumLab cannot tell that header apart from one a client sends itself to ports 3100/8100, so **also set `AUTHENTIK_PROXY_SECRET`** and have NPM send it. In the proxy host's Advanced config, add this inside the same `location` block that sets `X-authentik-username`:
+
+```nginx
+proxy_set_header X-BaumLab-Proxy-Secret "<value of AUTHENTIK_PROXY_SECRET>";
+```
+
+Header logins without the matching secret are rejected. The credential vault stays locked while header auth is on without a secret.
+
+---
+
+## Credential Vault
+
+Admins can store passwords per service on the **Vault** page.
+
+- Passwords and notes are encrypted (Fernet / AES) with a key derived from `VAULT_KEY`, or from `SECRET_KEY` if `VAULT_KEY` is unset. The key only exists in the container environment, so a copy of `data/` or `config/` alone reveals nothing.
+- **Back up the key.** If it changes or is lost, stored passwords cannot be recovered.
+- Admin-only. Each reveal, copy, create, update and delete is written to an audit log, and revealed passwords hide again after 30 s.
+- Never included in Git sync or PDF exports.
+- Locks itself when it isn't safe to use: when `SECRET_KEY` is still the default (login tokens could be forged), or when header auth is on without `AUTHENTIK_PROXY_SECRET`.
+
+---
+
+## Updates
+
+BaumLab checks the GitHub repo's `vX.Y.Z` tags every 6 hours and shows **↑ vX.Y.Z available** in the sidebar. Admins can apply the update from **Settings → Updates**:
+
+1. Deploy BaumLab in Portainer as a **Git repository stack**. Set `BAUMLAB_DATA_PATH` and `BAUMLAB_CONFIG_PATH` to absolute host paths in the stack's environment variables. Stacks started with `docker compose` on the host show as "created outside of Portainer" and can't be redeployed this way.
+2. Add that Portainer instance on the **Docker** page (URL + API key).
+3. In Settings → Updates, pick the connection and the BaumLab stack, then click **Apply Update**.
+
+BaumLab asks Portainer to redeploy the stack at the new tag. Portainer pulls it, rebuilds the images (`pull_policy: build`) and restarts the containers, and the page reloads once the new version answers. The stack's environment variables are sent back unchanged. The stack's Git reference is switched to the release tag (e.g. `refs/tags/v1.5.0`). OpenVAS's image is not re-pulled. Forks can point the check at their own repo.
 
 ---
 

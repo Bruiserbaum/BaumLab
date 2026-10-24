@@ -91,6 +91,8 @@ tr:hover td { background: var(--bg2); }
 .badge-green { background: #1a2e1a; color: var(--green); border: 1px solid var(--green); }
 .badge-red   { background: #2e1a1a; color: var(--red);   border: 1px solid var(--red); }
 .badge-gray  { background: var(--bg2); color: var(--text-muted); border: 1px solid var(--border); }
+.badge-blue  { background: #172236; color: #58a6ff;       border: 1px solid var(--accent); }
+.badge-yellow { background: #2e2717; color: var(--yellow); border: 1px solid var(--yellow); }
 
 button {
   background: var(--accent);
