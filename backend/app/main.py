@@ -17,7 +17,8 @@ from .routers import devices, monitors, scan, unifi, auth, users, settings, exte
 from .routers import syslog as syslog_router, portainer as portainer_router, git_sync as git_sync_router
 from .routers import vault as vault_router, updates as updates_router, tools as tools_router, repos as repos_router
 from .routers import backups as backups_router, alerts as alerts_router
-from .services import git_sync, updater, repo_tracker, backup_schedule, alerts
+from .routers import certs as certs_router, dashboard as dashboard_router
+from .services import git_sync, updater, repo_tracker, backup_schedule, alerts, certs
 from .services.config_service import read_config, decrypt
 from .services.syslog_listener import start_syslog_listener
 from .routers.portainer import _poll_all
@@ -193,6 +194,9 @@ async def lifespan(app: FastAPI):
     # Alert when a backup misses its schedule (failures alert immediately from the run itself)
     scheduler.add_job(backup_schedule.check_stale_alerts, "interval", minutes=30, id="backup_stale_alerts",
                       next_run_time=datetime.now() + timedelta(minutes=5))
+    # TLS certificate expiry, daily (sync job → runs in the scheduler's thread pool)
+    scheduler.add_job(certs.check_all, "interval", hours=24, id="cert_check",
+                      next_run_time=datetime.now() + timedelta(minutes=3))
     # Check GitHub for a newer release shortly after startup, then every 6 hours
     scheduler.add_job(updater.check_quietly, "interval", hours=6, id="update_check",
                       next_run_time=datetime.now() + timedelta(seconds=60))
@@ -237,6 +241,8 @@ app.include_router(tools_router.router)
 app.include_router(repos_router.router)
 app.include_router(backups_router.router)
 app.include_router(alerts_router.router)
+app.include_router(certs_router.router)
+app.include_router(dashboard_router.router)
 
 
 @app.get("/api/health")

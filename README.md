@@ -85,6 +85,16 @@ A self-hosted home lab monitoring, mapping, and security dashboard. Discover eve
 - **Coverage**: every service shows whether it is protected and whether the last backup is fresh. Manual records cover backups made elsewhere (Unraid, Proxmox, NAS snapshots)
 - **Import** an existing BaumLabBackup database (destinations, jobs, stacks)
 
+### Dashboard
+- **Home page** with tiles for monitors, services, backups, certificates, devices, Docker and BaumLab version, each linking to its section
+- **Needs attention**: monitors down, failing or stale backups, expiring certificates, public services without SSO, crash-looping containers, available updates
+- New devices this week and recent alerts
+
+### Certificates
+- **TLS expiry tracking** for every service with an `https://` URL or https protocol, plus hosts you add
+- Issuer, covered names, expiry date, trusted vs self-signed; checked daily or on demand
+- Alerts at 21 days, 7 days and on expiry
+
 ### Alerts
 - **Channels**: ntfy, Discord, email (SMTP), generic JSON webhook (Gotify, Home Assistant, …), each with a minimum severity and a test button
 - **Events**: monitor down / recovered (after N failed checks in a row), backup failed or finished with warnings, backup stale, new device (unknown MAC), BaumLab update available
