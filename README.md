@@ -85,6 +85,11 @@ A self-hosted home lab monitoring, mapping, and security dashboard. Discover eve
 - **Coverage**: every service shows whether it is protected and whether the last backup is fresh. Manual records cover backups made elsewhere (Unraid, Proxmox, NAS snapshots)
 - **Import** an existing BaumLabBackup database (destinations, jobs, stacks)
 
+### Alerts
+- **Channels**: ntfy, Discord, email (SMTP), generic JSON webhook (Gotify, Home Assistant, …), each with a minimum severity and a test button
+- **Events**: monitor down / recovered (after N failed checks in a row), backup failed or finished with warnings, backup stale, new device (unknown MAC), BaumLab update available
+- Fires on changes, not on every check; every alert is kept in a history with per-channel delivery results
+
 ### Repositories
 - **One view across Git hosts** — GitHub, GitHub Enterprise, Gitea and Forgejo sources (Settings → Repository Sources, read-only token)
 - Description, language, last activity and latest release per repo; group by source, owner or language; hide forks / archived

@@ -21,6 +21,7 @@ from sqlmodel import Session
 
 from ..database import engine
 from ..models.backup import BackupDestination, BackupJob, BackupRun, BackupStack
+from . import alerts
 from . import backup_docker as dk
 from . import backup_storage as st
 from . import vault
@@ -97,6 +98,19 @@ def _extract(archive: str, into: str) -> str:
     if not entries:
         raise RuntimeError("Archive is empty")
     return os.path.join(into, entries[0])
+
+
+def _alert_result(run: "_Run", kind: str, name: str, status: str, error: Optional[str] = None):
+    if status not in ("failed", "warning"):
+        return
+    detail = error or "; ".join(run.warnings)
+    try:
+        alerts.notify("backup_failed", severity="critical" if status == "failed" else "warning",
+                      title=f"{'❌' if status == 'failed' else '⚠️'} Backup {status}: {name}",
+                      message=f"The {kind} backup '{name}' {'failed' if status == 'failed' else 'finished with warnings'}: {detail}",
+                      url=alerts.link("/backups?tab=history"))
+    except Exception as e:   # never let alerting break a backup run
+        print(f"Backup alert failed: {e}")
 
 
 def _record_result(model, target_id: int, status: str):
@@ -230,9 +244,11 @@ def run_job_backup(job_id: int):
 
         status = run.finish(size=size, archive=f"{st.remote_name(dest)}:{st.base_path(dest)}/{os.path.basename(archive)}")
         _record_result(BackupJob, job_id, status)
+        _alert_result(run, "job", job.name, status)
     except Exception as e:
         if run:
             _record_result(BackupJob, job_id, run.finish(error=str(e)))
+            _alert_result(run, "job", job.name, "failed", str(e))
         print(f"Backup job {job_id} failed: {e}")
     finally:
         for c in stopped:     # only non-empty if we failed between stop and restart
@@ -387,9 +403,11 @@ def run_stack_backup(stack_id: int):
                 run.log(f"Retention failed — {err}", warning=True)
         status = run.finish(size=size, archive=f"{st.remote_name(dest)}:{stack_dir(stack)}/{os.path.basename(archive)}")
         _record_result(BackupStack, stack_id, status)
+        _alert_result(run, "stack", stack.name, status)
     except Exception as e:
         if run:
             _record_result(BackupStack, stack_id, run.finish(error=str(e)))
+            _alert_result(run, "stack", stack.name, "failed", str(e))
         print(f"Stack backup {stack_id} failed: {e}")
     finally:
         if tmp_dir:
