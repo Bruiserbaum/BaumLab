@@ -13,6 +13,7 @@ from datetime import datetime
 
 import httpx
 
+from . import alerts
 from .config_service import read_config, decrypt
 
 DEFAULT_REPO = "Bruiserbaum/BaumLab"
@@ -94,7 +95,14 @@ async def check() -> dict:
         latest_tag=tag,
         check_error=None,
     )
-    return status()
+    result = status()
+    # Alert once per new release
+    if result["update_available"] and alerts.transition("update", tag) is not None:
+        await asyncio.to_thread(
+            alerts.notify, "update_available", f"⬆️ BaumLab {tag} is available",
+            f"You're running v{result['current']}. Apply it from Settings → Updates.", "info",
+            alerts.link("/settings"))
+    return result
 
 
 async def check_quietly():

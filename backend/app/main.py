@@ -1,3 +1,4 @@
+import asyncio
 import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
@@ -15,8 +16,8 @@ from .services.auth import hash_password
 from .routers import devices, monitors, scan, unifi, auth, users, settings, external_scan, status, advanced_scan, vuln_scan, services
 from .routers import syslog as syslog_router, portainer as portainer_router, git_sync as git_sync_router
 from .routers import vault as vault_router, updates as updates_router, tools as tools_router, repos as repos_router
-from .routers import backups as backups_router
-from .services import git_sync, updater, repo_tracker, backup_schedule
+from .routers import backups as backups_router, alerts as alerts_router
+from .services import git_sync, updater, repo_tracker, backup_schedule, alerts
 from .services.config_service import read_config, decrypt
 from .services.syslog_listener import start_syslog_listener
 from .routers.portainer import _poll_all
@@ -27,9 +28,36 @@ APP_VERSION = "1.4.1"  # bump this on every release
 scheduler = AsyncIOScheduler()
 
 
+def _monitor_transition(session: Session, target: MonitorTarget, result: dict, threshold: int, now: datetime) -> list[dict]:
+    """Track consecutive failures per monitor; return alerts for down / recovered changes."""
+    st = alerts.get_state(session, f"monitor:{target.id}")
+    where = f"{target.host}:{target.port}" if target.port else target.host
+    out = []
+    if result["is_up"]:
+        if st.state == "down":
+            out.append(dict(event="monitor_down", severity="info", title=f"✅ {target.name} recovered",
+                            message=f"{where} is responding again (down since {st.changed_at:%Y-%m-%d %H:%M} UTC).",
+                            url=alerts.link("/monitors")))
+        if st.state != "up":
+            st.state, st.changed_at = "up", now
+        st.count = 0
+    else:
+        st.count += 1
+        if st.count >= threshold and st.state != "down":
+            out.append(dict(event="monitor_down", severity="critical", title=f"🔴 {target.name} is down",
+                            message=f"{where} ({target.protocol}) failed {st.count} checks in a row: "
+                                    f"{result.get('error') or 'no response'}",
+                            url=alerts.link("/monitors")))
+            st.state, st.changed_at = "down", now
+    session.add(st)
+    return out
+
+
 async def _run_monitor_checks():
     """Called by APScheduler every 30 s; runs only targets whose interval is due."""
     now = datetime.utcnow()
+    pending_alerts = []
+    threshold = alerts.monitor_failures()
     with Session(engine) as session:
         targets = session.exec(
             select(MonitorTarget).where(MonitorTarget.enabled == True)
@@ -56,7 +84,11 @@ async def _run_monitor_checks():
                 error=result.get("error"),
             )
             session.add(row)
+            pending_alerts += _monitor_transition(session, target, result, threshold, now)
         session.commit()
+    # Send after committing, off the event loop (delivery is blocking network I/O)
+    for alert in pending_alerts:
+        await asyncio.to_thread(alerts.notify, **alert)
 
 
 async def _run_scheduled_vuln_scans():
@@ -158,6 +190,9 @@ async def lifespan(app: FastAPI):
 
     git_sync.init(scheduler)
     backup_schedule.init(scheduler)   # registers every enabled backup job / stack schedule
+    # Alert when a backup misses its schedule (failures alert immediately from the run itself)
+    scheduler.add_job(backup_schedule.check_stale_alerts, "interval", minutes=30, id="backup_stale_alerts",
+                      next_run_time=datetime.now() + timedelta(minutes=5))
     # Check GitHub for a newer release shortly after startup, then every 6 hours
     scheduler.add_job(updater.check_quietly, "interval", hours=6, id="update_check",
                       next_run_time=datetime.now() + timedelta(seconds=60))
@@ -201,6 +236,7 @@ app.include_router(updates_router.router)
 app.include_router(tools_router.router)
 app.include_router(repos_router.router)
 app.include_router(backups_router.router)
+app.include_router(alerts_router.router)
 
 
 @app.get("/api/health")

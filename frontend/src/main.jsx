@@ -10,6 +10,7 @@ import VaultPage from './pages/VaultPage'
 import ToolsPage from './pages/ToolsPage'
 import ReposPage from './pages/ReposPage'
 import BackupsPage from './pages/backups/BackupsPage'
+import AlertsPage from './pages/AlertsPage'
 import NetworkMapPage from './pages/NetworkMapPage'
 import UsersPage from './pages/UsersPage'
 import SettingsPage from './pages/SettingsPage'
@@ -75,6 +76,7 @@ function App() {
           <NavLink to="/repos">Repositories</NavLink>
 
           <div className="nav-section" style={{ marginTop: 'auto' }}>Admin</div>
+          {isAdmin && <NavLink to="/alerts">Alerts</NavLink>}
           <NavLink to="/users">Users</NavLink>
           {isAdmin && <NavLink to="/settings">Settings</NavLink>}
           <div style={{ marginTop: 8, padding: '12px 16px', borderTop: '1px solid var(--border)' }}>
@@ -107,6 +109,7 @@ function App() {
             <Route path="/tools" element={<ToolsPage />} />
             <Route path="/repos" element={<ReposPage />} />
             <Route path="/backups" element={<BackupsPage />} />
+            <Route path="/alerts" element={<AlertsPage />} />
             <Route path="/monitors" element={<MonitorsPage />} />
             <Route path="/users" element={<UsersPage />} />
             <Route path="/external-scan" element={<ExternalScanPage />} />

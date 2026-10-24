@@ -5,6 +5,7 @@ from ..models.device import Device
 from ..services.scanner import scan_network, scan_ports, guess_device_type
 from ..database import get_session, engine
 from ..services.auth import get_current_user
+from ..services import alerts
 
 router = APIRouter(prefix="/api/scan", tags=["scan"], dependencies=[Depends(get_current_user)])
 
@@ -28,6 +29,7 @@ def _upsert_devices(cidr: str):
         _log(f"nmap complete — {len(found)} host(s) responded")
         _scan_state["found"] = len(found)
 
+        new_devices = []   # never-seen MACs, alerted after commit
         with Session(engine) as session:
             new_count = 0
             for info in found:
@@ -52,6 +54,12 @@ def _upsert_devices(cidr: str):
                     session.add(existing)
                     _log(f"Updated {info['ip']} ({info.get('hostname') or info.get('vendor') or 'unknown'})")
                 else:
+                    # A known MAC at a new IP is a DHCP change, not a new device
+                    known_mac = info.get("mac") and session.exec(
+                        select(Device).where(Device.mac == info["mac"])
+                    ).first()
+                    if not known_mac:
+                        new_devices.append(info)
                     device = Device(
                         ip=info["ip"],
                         mac=info.get("mac"),
@@ -68,6 +76,15 @@ def _upsert_devices(cidr: str):
                     _log(f"New device: {info['ip']} ({info.get('hostname') or info.get('vendor') or 'unknown'})")
             session.commit()
         _log(f"Done — {new_count} new device(s) added, {len(found) - new_count} updated")
+        for info in new_devices:
+            name = info.get("hostname") or info.get("vendor") or "unknown device"
+            try:
+                alerts.notify("new_device", severity="warning", title=f"🆕 New device: {name}",
+                              message=f"{info['ip']} · MAC {info.get('mac') or 'unknown'} · "
+                                      f"{info.get('vendor') or 'unknown vendor'} appeared on {cidr}.",
+                              url=alerts.link("/devices"))
+            except Exception as e:
+                _log(f"Alert failed: {e}")
     except Exception as exc:
         _log(f"ERROR: {exc}")
     finally:

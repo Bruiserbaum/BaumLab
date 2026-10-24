@@ -11,7 +11,7 @@ from sqlmodel import Session, select
 
 from ..database import engine
 from ..models.backup import BackupJob, BackupRecord, BackupStack
-from . import backup_engine
+from . import alerts, backup_engine
 
 _scheduler = None
 MANUAL_STACK_STALE_DAYS = 30
@@ -100,6 +100,21 @@ def freshness(enabled: bool, cron: Optional[str], last_status: Optional[str],
     # Allow one missed run plus an hour before calling it stale
     limit = (interval * 2 + timedelta(hours=1)) if interval else timedelta(days=fallback_days)
     return "stale" if datetime.utcnow() - last_success > limit else "ok"
+
+
+def check_stale_alerts():
+    """Alert once when a job / stack misses its schedule; re-arms when it's fresh again."""
+    with Session(engine) as s:
+        targets = [("job", j) for j in s.exec(select(BackupJob)).all()] + \
+                  [("stack", x) for x in s.exec(select(BackupStack)).all()]
+    for kind, t in targets:
+        status = freshness(t.enabled, t.schedule_cron, t.last_run_status, t.last_success_at)
+        prev = alerts.transition(f"backup:{kind}:{t.id}", status)
+        if status == "stale" and prev is not None:
+            last = f"{t.last_success_at:%Y-%m-%d %H:%M} UTC" if t.last_success_at else "never"
+            alerts.notify("backup_stale", severity="warning", title=f"⚠️ Backup stale: {t.name}",
+                          message=f"The {kind} backup '{t.name}' last succeeded {last} and has missed its schedule"
+                                  f" ({t.schedule_cron or 'manual'}).", url=alerts.link("/backups"))
 
 
 _RANK = {"ok": 0, "stale": 1, "failed": 2, "never": 3, "disabled": 4}
