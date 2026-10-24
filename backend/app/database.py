@@ -7,6 +7,7 @@ from .models import portainer as _portainer_models  # noqa: F401
 from .models import vuln_schedule as _vuln_schedule_models  # noqa: F401
 from .models import service as _service_models  # noqa: F401
 from .models import vault as _vault_models  # noqa: F401
+from .models import repo as _repo_models  # noqa: F401
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./data/baumlab.db")
 

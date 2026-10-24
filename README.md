@@ -74,7 +74,13 @@ A self-hosted home lab monitoring, mapping, and security dashboard. Discover eve
 - **Scan** — default CIDR ranges, auto-scan toggle and interval
 - **OpenVAS** — socket path or host/port, credentials; test connection button
 - **Git Sync** — Forgejo / Gitea repo URL, token, branch, folder, auto-sync toggle; test connection button
+- **Repository Sources** — Git hosts listed on the Repositories page
 - **Updates** — check GitHub for new releases and apply them through Portainer (see [Updates](#updates))
+
+### Repositories
+- **One view across Git hosts** — GitHub, GitHub Enterprise, Gitea and Forgejo sources (Settings → Repository Sources, read-only token)
+- Description, language, last activity and latest release per repo; group by source, owner or language; hide forks / archived
+- Refreshed hourly and on demand
 
 ### Tools
 - **Secret keys** — hex-32, base64url, JWT hex-48, database passwords (compose-safe), alphanumeric keys, UUIDs; generated in the browser
