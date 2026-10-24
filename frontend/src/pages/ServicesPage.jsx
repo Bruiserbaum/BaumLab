@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useApi, useAuth } from '../auth'
 import DiscoverPanel from './DiscoverPanel'
 
@@ -13,7 +13,7 @@ const CATEGORY_SUGGESTIONS = [
   'Security', 'Storage', 'Productivity', 'Development', 'Gaming',
 ]
 
-const blankExtras = { monitor: true, vault: false, vault_username: '', vault_secret: '' }
+const blankExtras = { monitor: true, vault: false, vault_username: '', vault_secret: '', backup: false }
 
 const blank = {
   name: '', status: 'active', category: '', host: '', platform: '', ip: '', port: '', protocol: 'http',
@@ -56,14 +56,20 @@ function esc(v) {
 }
 
 /** Open a print-friendly inventory in a new window; the browser's print dialog can save it as PDF. */
-function printReport(groups, { groupLabel, search, total }) {
+const BACKUP_LABELS = {
+  ok: ['green', 'OK'], stale: ['yellow', 'Stale'], failed: ['red', 'Failed'],
+  never: ['red', 'Never ran'], disabled: ['gray', 'Disabled'], none: ['red', 'None'],
+}
+
+function printReport(groups, { groupLabel, search, total, backups = {} }) {
   const yes = b => (b ? '✓' : '')
+  const backupText = s => s.status === 'decommissioned' ? '' : BACKUP_LABELS[backups[s.id]?.status ?? 'none'][1]
   const sections = groups.map(([group, items]) => `
     <h2>${esc(group)} <span class="count">(${items.length})</span></h2>
     <table>
       <thead><tr>
         <th class="chk"></th><th>Name</th><th>Category</th><th>Host</th><th>IP : Port</th>
-        <th>VLAN</th><th>Access URL</th><th>Proxy</th><th>SSO</th><th>Public</th><th>Notes</th>
+        <th>VLAN</th><th>Access URL</th><th>Proxy</th><th>SSO</th><th>Public</th><th>Backup</th><th>Notes</th>
       </tr></thead>
       <tbody>${items.map(s => `
         <tr class="${s.status === 'decommissioned' ? 'retired' : ''}">
@@ -77,6 +83,7 @@ function printReport(groups, { groupLabel, search, total }) {
           <td class="c">${yes(s.proxied)}</td>
           <td class="c">${yes(s.sso)}</td>
           <td class="c ${s.external && !s.sso ? 'warn' : ''}">${yes(s.external)}</td>
+          <td class="${['OK', ''].includes(backupText(s)) ? '' : 'warn'}">${esc(backupText(s))}</td>
           <td>${esc(s.notes)}</td>
         </tr>`).join('')}
       </tbody>
@@ -158,6 +165,8 @@ export default function ServicesPage() {
   const [showDiscover, setShowDiscover] = useState(false)
   const [extras, setExtras]       = useState(blankExtras)   // pieces created along with a new service
   const [notice, setNotice]       = useState(null)
+  const [backups, setBackups]     = useState({})     // service id → { status, sources } from /api/backups/coverage
+  const navigate = useNavigate()
 
   async function loadServices() {
     const r = await api(`${API}/services/`)
@@ -194,6 +203,7 @@ export default function ServicesPage() {
         setVaultCounts(counts)
       }).catch(() => {})
     }
+    api(`${API}/backups/coverage`).then(r => r.ok ? r.json() : {}).then(setBackups).catch(() => {})
     fetch(`${API}/status/public`).then(r => r.json()).then(data => {
       const map = {}
       for (const m of data.monitors ?? []) map[m.id] = m
@@ -281,7 +291,9 @@ export default function ServicesPage() {
       else done.push(`vault entry failed: ${(await v.json().catch(() => ({}))).detail || `HTTP ${v.status}`}`)
     }
     setNotice({ ok: !done.some(d => d.includes('failed')), text: done.join(' · ') })
+    const wantsBackup = isNew && isAdmin && extras.backup
     cancelForm()
+    if (wantsBackup) { navigate(`/backups?tab=jobs&service=${saved.id}`); return }
     await load()
   }
 
@@ -336,6 +348,7 @@ export default function ServicesPage() {
           ['Behind proxy', live.filter(s => s.proxied).length],
           ['Behind SSO', live.filter(s => s.sso).length],
           ['Internet-facing', live.filter(s => s.external).length],
+          ['Without backup', live.filter(s => !backups[s.id] || backups[s.id].status === 'none').length],
           ['Hosts', new Set(live.map(s => s.host).filter(Boolean)).size],
           ...(retired ? [['Decommissioned', retired]] : []),
         ].map(([label, n]) => (
@@ -397,6 +410,7 @@ export default function ServicesPage() {
               groupLabel: (GROUPINGS[groupBy] ?? GROUPINGS.category).label,
               search: search.trim(),
               total: services.length,
+              backups,
             })}>
             ⎙ Export PDF
           </button>
@@ -503,6 +517,10 @@ export default function ServicesPage() {
                   <Check label="Vault entry with login" checked={extras.vault}
                     onChange={v => setExtras(x => ({ ...x, vault: v }))} />
                 )}
+                {isAdmin && (
+                  <Check label="Set up a backup job next" checked={extras.backup}
+                    onChange={v => setExtras(x => ({ ...x, backup: v }))} />
+                )}
               </div>
               {isAdmin && extras.vault && (
                 <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
@@ -558,6 +576,7 @@ export default function ServicesPage() {
                 <th>IP : Port</th>
                 <th>VLAN</th>
                 <th>Access</th>
+                <th>Backup</th>
                 <th>Notes</th>
                 <th></th>
               </tr>
@@ -634,6 +653,19 @@ export default function ServicesPage() {
                         )}
                         {!s.proxied && !s.sso && !s.external && <span className="badge badge-gray">Direct</span>}
                       </div>
+                    </td>
+                    <td>
+                      {!isRetired && (() => {
+                        const cov = backups[s.id]
+                        const [color, label] = BACKUP_LABELS[cov?.status ?? 'none']
+                        const badge = (
+                          <span className={`badge badge-${color}`}
+                            title={cov ? cov.sources.map(x => `${x.name} (${x.status})`).join('\n') : 'No backup job or record'}>
+                            {label}
+                          </span>
+                        )
+                        return isAdmin ? <Link to="/backups" style={{ textDecoration: 'none' }}>{badge}</Link> : badge
+                      })()}
                     </td>
                     <td style={{ fontSize: 12, color: 'var(--text-muted)', maxWidth: 260 }}>{s.notes || ''}</td>
                     <td>

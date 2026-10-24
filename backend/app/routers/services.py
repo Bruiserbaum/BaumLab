@@ -1,9 +1,11 @@
+import json
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 from ..models.service import Service, ServiceCreate, ServiceNew, STATUSES
 from ..models.monitor import MonitorTarget
 from ..models.vault import VaultEntry
+from ..models.backup import BackupJob, BackupRecord, BackupStack
 from ..database import get_session
 from ..services.auth import get_current_user
 from ..services import git_sync, discovery
@@ -120,6 +122,13 @@ def delete_service(service_id: int, session: Session = Depends(get_session)):
     for entry in session.exec(select(VaultEntry).where(VaultEntry.service_id == service_id)).all():
         entry.service_id = None
         session.add(entry)
+    for rec in session.exec(select(BackupRecord).where(BackupRecord.service_id == service_id)).all():
+        session.delete(rec)
+    for target in [*session.exec(select(BackupJob)).all(), *session.exec(select(BackupStack)).all()]:
+        ids = json.loads(target.service_ids or "[]")
+        if service_id in ids:
+            target.service_ids = json.dumps([i for i in ids if i != service_id])
+            session.add(target)
     session.delete(service)
     session.commit()
     git_sync.queue_change(message)

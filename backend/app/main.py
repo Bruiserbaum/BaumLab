@@ -15,7 +15,8 @@ from .services.auth import hash_password
 from .routers import devices, monitors, scan, unifi, auth, users, settings, external_scan, status, advanced_scan, vuln_scan, services
 from .routers import syslog as syslog_router, portainer as portainer_router, git_sync as git_sync_router
 from .routers import vault as vault_router, updates as updates_router, tools as tools_router, repos as repos_router
-from .services import git_sync, updater, repo_tracker
+from .routers import backups as backups_router
+from .services import git_sync, updater, repo_tracker, backup_schedule
 from .services.config_service import read_config, decrypt
 from .services.syslog_listener import start_syslog_listener
 from .routers.portainer import _poll_all
@@ -156,6 +157,7 @@ async def lifespan(app: FastAPI):
     print(f"Portainer polling enabled every {poll_interval}s")
 
     git_sync.init(scheduler)
+    backup_schedule.init(scheduler)   # registers every enabled backup job / stack schedule
     # Check GitHub for a newer release shortly after startup, then every 6 hours
     scheduler.add_job(updater.check_quietly, "interval", hours=6, id="update_check",
                       next_run_time=datetime.now() + timedelta(seconds=60))
@@ -198,6 +200,7 @@ app.include_router(vault_router.router)
 app.include_router(updates_router.router)
 app.include_router(tools_router.router)
 app.include_router(repos_router.router)
+app.include_router(backups_router.router)
 
 
 @app.get("/api/health")

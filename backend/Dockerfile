@@ -1,4 +1,9 @@
+FROM rclone/rclone:1.68 AS rclone
+
 FROM python:3.12-slim
+
+# rclone uploads backups to B2 / SMB / SFTP / local destinations
+COPY --from=rclone /usr/local/bin/rclone /usr/local/bin/rclone
 
 # nmap + arp-scan for network discovery
 RUN apt-get update && apt-get install -y --no-install-recommends \
