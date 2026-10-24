@@ -18,7 +18,7 @@ from .routers import syslog as syslog_router, portainer as portainer_router, git
 from .routers import vault as vault_router, updates as updates_router, tools as tools_router, repos as repos_router
 from .routers import backups as backups_router, alerts as alerts_router
 from .routers import certs as certs_router, dashboard as dashboard_router
-from .routers import icons as icons_router, launchpad as launchpad_router
+from .routers import icons as icons_router, launchpad as launchpad_router, terminal as terminal_router
 from .services import git_sync, updater, repo_tracker, backup_schedule, alerts, certs
 from .services.config_service import read_config, decrypt
 from .services.syslog_listener import start_syslog_listener
@@ -247,6 +247,8 @@ app.include_router(dashboard_router.router)
 app.include_router(icons_router.router)
 app.include_router(launchpad_router.router)
 app.include_router(launchpad_router.public_router)
+app.include_router(terminal_router.router)
+app.include_router(terminal_router.ws_router)
 
 
 @app.get("/api/health")

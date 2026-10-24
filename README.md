@@ -85,6 +85,13 @@ A self-hosted home lab monitoring, mapping, and security dashboard. Discover eve
 - **Coverage**: every service shows whether it is protected and whether the last backup is fresh. Manual records cover backups made elsewhere (Unraid, Proxmox, NAS snapshots)
 - **Import** an existing BaumLabBackup database (destinations, jobs, stacks)
 
+### Terminal
+- **Browser SSH** to your machines with **multiple tabs** (xterm.js): colours, resizing, clickable links, reconnect without losing scrollback
+- **Hosts** can be picked from discovered devices and linked to services. Passwords and private keys are stored in the **vault**, decrypted only while connecting, and every use is audited.
+- **Host keys pinned on first connect**: if a host's key changes, BaumLab refuses to connect (before sending any credentials) until you confirm
+- Admin-only, locked with the vault; session log of who connected where and when; idle sessions close after an hour
+- Behind Nginx Proxy Manager, turn on **Websockets Support** for the BaumLab proxy host
+
 ### Launchpad
 - **Links page built from the Services inventory**: tiles grouped by category with icons and live up/down dots, so it never drifts from what you actually run. Hidden or decommissioned services drop off automatically.
 - **Bookmarks** for links that aren't services (router UI, cloud consoles, docs)

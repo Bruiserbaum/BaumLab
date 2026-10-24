@@ -16,4 +16,5 @@ pyotp==2.9.0              # TOTP / HOTP for Google Authenticator MFA
 qrcode==7.4.2             # QR code generation (SVG, no Pillow needed)
 argon2-cffi==23.1.0       # Argon2id hashes for the Vaultwarden ADMIN_TOKEN tool
 docker==7.1.0             # Docker SDK for backups (volume archives, DB dumps, stop/start)
+asyncssh==2.17.0          # SSH client for the web terminal, host metrics and remote commands
 # GMP client is implemented directly (see services/openvas.py) — no python-gvm dependency needed
