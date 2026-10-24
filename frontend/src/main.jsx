@@ -11,6 +11,8 @@ import ToolsPage from './pages/ToolsPage'
 import ReposPage from './pages/ReposPage'
 import BackupsPage from './pages/backups/BackupsPage'
 import AlertsPage from './pages/AlertsPage'
+import DashboardPage from './pages/DashboardPage'
+import CertificatesPage from './pages/CertificatesPage'
 import NetworkMapPage from './pages/NetworkMapPage'
 import UsersPage from './pages/UsersPage'
 import SettingsPage from './pages/SettingsPage'
@@ -53,8 +55,10 @@ function App() {
       <div className="layout">
         <nav className="sidebar">
           <div className="logo">BaumLab</div>
+          <NavLink to="/" end>Dashboard</NavLink>
+
           <div className="nav-section">Network</div>
-          <NavLink to="/" end>Network Map</NavLink>
+          <NavLink to="/map">Network Map</NavLink>
           <NavLink to="/devices">Devices</NavLink>
           <NavLink to="/unifi">UniFi</NavLink>
           <NavLink to="/syslog">Syslog</NavLink>
@@ -70,6 +74,7 @@ function App() {
           <NavLink to="/external-scan">External Scan</NavLink>
           <NavLink to="/target-scan">Target Scan</NavLink>
           <NavLink to="/vuln-scan">Vuln Scan</NavLink>
+          <NavLink to="/certificates">Certificates</NavLink>
 
           <div className="nav-section">Tools</div>
           <NavLink to="/tools">Tools</NavLink>
@@ -102,7 +107,9 @@ function App() {
         </nav>
         <main className="content">
           <Routes>
-            <Route path="/" element={<NetworkMapPage />} />
+            <Route path="/" element={<DashboardPage />} />
+            <Route path="/map" element={<NetworkMapPage />} />
+            <Route path="/certificates" element={<CertificatesPage />} />
             <Route path="/devices" element={<DevicesPage />} />
             <Route path="/services" element={<ServicesPage />} />
             <Route path="/vault" element={<VaultPage />} />

@@ -38,6 +38,7 @@
 }
 
 .logo + .nav-section { padding-top: 0; }
+a.card:hover { border-color: var(--accent); }
 
 .logo {
   font-size: 18px;

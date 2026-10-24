@@ -10,6 +10,7 @@ from .models import vault as _vault_models  # noqa: F401
 from .models import repo as _repo_models  # noqa: F401
 from .models import backup as _backup_models  # noqa: F401
 from .models import alert as _alert_models  # noqa: F401
+from .models import cert as _cert_models  # noqa: F401
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./data/baumlab.db")
 
