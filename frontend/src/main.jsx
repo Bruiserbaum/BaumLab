@@ -13,6 +13,7 @@ import BackupsPage from './pages/backups/BackupsPage'
 import AlertsPage from './pages/AlertsPage'
 import DashboardPage from './pages/DashboardPage'
 import CertificatesPage from './pages/CertificatesPage'
+import LaunchpadPage from './pages/LaunchpadPage'
 import NetworkMapPage from './pages/NetworkMapPage'
 import UsersPage from './pages/UsersPage'
 import SettingsPage from './pages/SettingsPage'
@@ -56,6 +57,7 @@ function App() {
         <nav className="sidebar">
           <div className="logo">BaumLab</div>
           <NavLink to="/" end>Dashboard</NavLink>
+          <NavLink to="/launchpad">Launchpad</NavLink>
 
           <div className="nav-section">Network</div>
           <NavLink to="/map">Network Map</NavLink>
@@ -109,6 +111,7 @@ function App() {
           <Routes>
             <Route path="/" element={<DashboardPage />} />
             <Route path="/map" element={<NetworkMapPage />} />
+            <Route path="/launchpad" element={<LaunchpadPage />} />
             <Route path="/certificates" element={<CertificatesPage />} />
             <Route path="/devices" element={<DevicesPage />} />
             <Route path="/services" element={<ServicesPage />} />

@@ -24,6 +24,8 @@ class Service(SQLModel, table=True):
     external: bool = False                     # Reachable from the internet
     monitor_id: Optional[int] = Field(default=None, foreign_key="monitortarget.id")
     credential_ref: Optional[str] = None       # Vaultwarden item link or name — never the secret itself
+    icon: Optional[str] = None                 # file name in the icon library (/api/icons/file/<icon>)
+    launchpad: bool = True                     # show a tile on the Launchpad
     notes: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
@@ -45,6 +47,8 @@ class ServiceCreate(SQLModel):
     external: bool = False
     monitor_id: Optional[int] = None
     credential_ref: Optional[str] = None
+    icon: Optional[str] = None
+    launchpad: bool = True
     notes: Optional[str] = None
 
 
