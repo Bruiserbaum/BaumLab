@@ -186,10 +186,16 @@ export default function SettingsPage() {
   if (loading)  return <div><h1>Settings</h1><p style={{ color: 'var(--text-muted)' }}>Loading…</p></div>
 
   return (
-    <div style={{ maxWidth: 600 }}>
-      <h1>Settings</h1>
+    <form onSubmit={save}>
+      {/* Sticky header keeps Save reachable however far down the page you are */}
+      <div className="settings-header">
+        <h1 style={{ margin: 0 }}>Settings</h1>
+        {error && <span style={{ fontSize: 12, color: 'var(--red)' }}>✗ {error}</span>}
+        {saved && <span style={{ fontSize: 12, color: 'var(--green)' }}>✓ Saved</span>}
+        <button type="submit" style={{ marginLeft: 'auto' }}>Save Settings</button>
+      </div>
 
-      <form onSubmit={save} style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      <div className="settings-grid">
 
         {/* ── UniFi ──────────────────────────────────────────────── */}
         <section className="card">
@@ -481,27 +487,15 @@ export default function SettingsPage() {
           </p>
         </section>
 
-        {error && (
-          <div style={{ fontSize: 12, color: 'var(--red)', background: '#2e1a1a',
-            border: '1px solid var(--red)', borderRadius: 6, padding: '8px 12px' }}>
-            {error}
+        {/* ── About ── */}
+        <section className="card">
+          <h2 style={{ marginTop: 0, marginBottom: 8, fontSize: 15 }}>About</h2>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+            BaumLab{version && <span style={{ marginLeft: 8, fontFamily: 'monospace', color: 'var(--text)' }}>v{version}</span>}
           </div>
-        )}
-
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          <button type="submit">Save Settings</button>
-          {saved && <span style={{ fontSize: 12, color: 'var(--green)' }}>✓ Saved</span>}
-        </div>
-      </form>
-
-      {/* ── About ── */}
-      <section className="card" style={{ marginTop: 24 }}>
-        <h2 style={{ marginTop: 0, marginBottom: 8, fontSize: 15 }}>About</h2>
-        <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-          BaumLab{version && <span style={{ marginLeft: 8, fontFamily: 'monospace', color: 'var(--text)' }}>v{version}</span>}
-        </div>
-      </section>
-    </div>
+        </section>
+      </div>
+    </form>
   )
 }
 
