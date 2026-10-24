@@ -16,6 +16,12 @@ services:
       - ${BAUMLAB_DATA_PATH:-./data}:/app/data          # SQLite database + persistent state
       - ${BAUMLAB_CONFIG_PATH:-./config}:/app/config    # User config (credentials, scan ranges, etc.)
       - gvmd-socket:/var/run/gvmd # Shared gvmd Unix socket from OpenVAS
+      # Backups: Docker access to stop/start containers, archive volumes and dump databases.
+      # This gives BaumLab root-equivalent control of the host (as does the Portainer key).
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Backup scratch space — must be the SAME path on both sides: helper containers that
+      # archive volumes are created by the host's Docker daemon and mount this host path
+      - /tmp/baumlab-backup:/tmp/baumlab-backup
     # Set these in Portainer → Stack → Environment Variables (or in a local .env file)
     # Required: SECRET_KEY, ADMIN_PASSWORD
     # Optional: ADMIN_USERNAME (default: admin), TOKEN_EXPIRE_HOURS (default: 8)
@@ -28,6 +34,9 @@ services:
       - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD}
       - TOKEN_EXPIRE_HOURS=${TOKEN_EXPIRE_HOURS:-8}
+      # Time zone for backup cron schedules (e.g. America/New_York)
+      - TZ=${TZ:-UTC}
+      - BACKUP_TMP_DIR=/tmp/baumlab-backup
       # Authentik forward auth (NPM header-based auto-login) — see BaumDocker/authentik/README
       - AUTHENTIK_HEADER_AUTH=${AUTHENTIK_HEADER_AUTH:-false}
       # Shared secret NPM sends as X-BaumLab-Proxy-Secret — required for the vault when header auth is on

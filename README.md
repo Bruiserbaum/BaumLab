@@ -77,6 +77,14 @@ A self-hosted home lab monitoring, mapping, and security dashboard. Discover eve
 - **Repository Sources** — Git hosts listed on the Repositories page
 - **Updates** — check GitHub for new releases and apply them through Portainer (see [Updates](#updates))
 
+### Backups (merged from BaumLabBackup)
+- **Container jobs**: archive Docker volumes and bind mounts, optional PostgreSQL / MySQL dump, optionally stop containers for a consistent copy (restarted before the upload), cron schedules and retention
+- **Stack backups** for disaster recovery: a compose project's named volumes, its environment (encrypted) and the repo it deploys from
+- **Destinations**: Backblaze B2, SMB / NAS, SFTP, local folder (via rclone; credentials stay encrypted and are only handed to rclone while it runs)
+- **Restore**: pick an archive and restore volumes and/or the database. For stacks: restore volumes and view the saved `.env` to redeploy in Portainer
+- **Coverage**: every service shows whether it is protected and whether the last backup is fresh. Manual records cover backups made elsewhere (Unraid, Proxmox, NAS snapshots)
+- **Import** an existing BaumLabBackup database (destinations, jobs, stacks)
+
 ### Repositories
 - **One view across Git hosts** — GitHub, GitHub Enterprise, Gitea and Forgejo sources (Settings → Repository Sources, read-only token)
 - Description, language, last activity and latest release per repo; group by source, owner or language; hide forks / archived
@@ -160,6 +168,7 @@ docker compose up -d
 | `AUTHENTIK_HEADER_AUTH` | `false` | Log in from NPM forward-auth headers |
 | `AUTHENTIK_PROXY_SECRET` | — | Shared secret NPM must send as `X-BaumLab-Proxy-Secret`; **required with header auth** |
 | `VAULT_KEY` | *(SECRET_KEY)* | Credential vault encryption key — back it up |
+| `TZ` | `UTC` | Time zone for backup schedules, e.g. `America/New_York` |
 
 ### `config/config.yaml`
 
@@ -220,6 +229,19 @@ Admins can store passwords per service on the **Vault** page.
 - Admin-only. Each reveal, copy, create, update and delete is written to an audit log, and revealed passwords hide again after 30 s.
 - Never included in Git sync or PDF exports.
 - Locks itself when it isn't safe to use: when `SECRET_KEY` is still the default (login tokens could be forged), or when header auth is on without `AUTHENTIK_PROXY_SECRET`.
+
+---
+
+## Backups
+
+The api container mounts `/var/run/docker.sock` so it can stop and start containers, dump databases and archive volumes. That gives BaumLab root-equivalent control of the Docker host, as the Portainer API key it can store already does, so keep it behind Authentik and set `AUTHENTIK_PROXY_SECRET`. Volumes are archived by short-lived `alpine` containers. `/tmp/baumlab-backup` is the scratch folder and must be mounted at the same path on the host and in the container (see `docker-compose.yml`).
+
+**Moving from BaumLabBackup:**
+1. Run `docker cp baumlabbackup:/data/baumlabbackup.db .`
+2. In Backups → Import, upload that file along with BaumLabBackup's `SECRET_KEY`.
+3. Stop BaumLabBackup, then enable the imported jobs. They are imported disabled so nothing runs twice.
+
+Existing archives stay restorable.
 
 ---
 

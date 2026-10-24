@@ -9,6 +9,7 @@ import ServicesPage from './pages/ServicesPage'
 import VaultPage from './pages/VaultPage'
 import ToolsPage from './pages/ToolsPage'
 import ReposPage from './pages/ReposPage'
+import BackupsPage from './pages/backups/BackupsPage'
 import NetworkMapPage from './pages/NetworkMapPage'
 import UsersPage from './pages/UsersPage'
 import SettingsPage from './pages/SettingsPage'
@@ -62,6 +63,7 @@ function App() {
           {isAdmin && <NavLink to="/vault">Vault</NavLink>}
           <NavLink to="/monitors">Monitors</NavLink>
           <NavLink to="/portainer">Docker</NavLink>
+          {isAdmin && <NavLink to="/backups">Backups</NavLink>}
 
           <div className="nav-section">Security</div>
           <NavLink to="/external-scan">External Scan</NavLink>
@@ -104,6 +106,7 @@ function App() {
             <Route path="/vault" element={<VaultPage />} />
             <Route path="/tools" element={<ToolsPage />} />
             <Route path="/repos" element={<ReposPage />} />
+            <Route path="/backups" element={<BackupsPage />} />
             <Route path="/monitors" element={<MonitorsPage />} />
             <Route path="/users" element={<UsersPage />} />
             <Route path="/external-scan" element={<ExternalScanPage />} />
