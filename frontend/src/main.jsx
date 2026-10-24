@@ -14,6 +14,7 @@ import AlertsPage from './pages/AlertsPage'
 import DashboardPage from './pages/DashboardPage'
 import CertificatesPage from './pages/CertificatesPage'
 import LaunchpadPage from './pages/LaunchpadPage'
+import HomePage from './pages/HomePage'
 import NetworkMapPage from './pages/NetworkMapPage'
 import UsersPage from './pages/UsersPage'
 import SettingsPage from './pages/SettingsPage'
@@ -43,8 +44,10 @@ function App() {
       .catch(() => {})
   }, [token, isAdmin])
 
-  // Public route — no login required
+  // Public routes — no login required
   if (window.location.pathname === '/status') return <StatusPage />
+  // Home page decides for itself: full Launchpad when signed in, public tiles otherwise
+  if (window.location.pathname === '/home') return <HomePage />
 
   // Wait for silent auth checks (OIDC callback / header auth) before deciding to show login
   if (authChecking) return null

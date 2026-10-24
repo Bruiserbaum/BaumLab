@@ -39,6 +39,11 @@ def migrate_db():
         "ALTER TABLE containersnapshot ADD COLUMN ports TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE service ADD COLUMN icon TEXT",
         "ALTER TABLE service ADD COLUMN launchpad BOOLEAN NOT NULL DEFAULT 1",
+        "ALTER TABLE service ADD COLUMN launchpad_group TEXT",
+        "ALTER TABLE service ADD COLUMN launchpad_order INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE service ADD COLUMN launchpad_public BOOLEAN NOT NULL DEFAULT 0",
+        'ALTER TABLE bookmark ADD COLUMN "order" INTEGER NOT NULL DEFAULT 0',
+        "ALTER TABLE bookmark ADD COLUMN public BOOLEAN NOT NULL DEFAULT 0",
     ]
     with engine.connect() as conn:
         for stmt in migrations:

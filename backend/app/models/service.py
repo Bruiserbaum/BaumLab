@@ -26,6 +26,9 @@ class Service(SQLModel, table=True):
     credential_ref: Optional[str] = None       # Vaultwarden item link or name — never the secret itself
     icon: Optional[str] = None                 # file name in the icon library (/api/icons/file/<icon>)
     launchpad: bool = True                     # show a tile on the Launchpad
+    launchpad_group: Optional[str] = None      # Launchpad group (None = category)
+    launchpad_order: int = 0                   # position within the group
+    launchpad_public: bool = False             # visible on the home page without signing in
     notes: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)

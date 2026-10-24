@@ -246,6 +246,7 @@ app.include_router(certs_router.router)
 app.include_router(dashboard_router.router)
 app.include_router(icons_router.router)
 app.include_router(launchpad_router.router)
+app.include_router(launchpad_router.public_router)
 
 
 @app.get("/api/health")

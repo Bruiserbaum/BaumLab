@@ -11,6 +11,8 @@ class Bookmark(SQLModel, table=True):
     group: str = "Bookmarks"
     icon: Optional[str] = None                 # file name in the icon library
     description: Optional[str] = None
+    order: int = 0                             # position within the group
+    public: bool = False                       # visible on the home page without signing in
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 

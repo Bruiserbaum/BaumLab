@@ -2,9 +2,9 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useApi, useAuth } from '../auth'
 import IconPicker, { AppIcon } from '../components/IconPicker'
+import { TileBody, TileLink, buildTiles, gridStyle, groupTiles, matches, tileStyle } from '../components/launchpadTiles'
 
 const API = '/api/launchpad'
-const STATUS_DOT = { true: 'var(--green)', false: 'var(--red)' }
 
 async function call(api, url, options = {}) {
   const isJson = typeof options.body === 'string'
@@ -14,41 +14,38 @@ async function call(api, url, options = {}) {
   return data
 }
 
-function Tile({ tile, editing, onIcon, onToggle, onEdit, onDelete }) {
+const smallBtn = { fontSize: 11, padding: '2px 8px' }
+
+/** Edit-mode tile: draggable, with icon / visibility / public controls. */
+function EditTile({ tile, isAdmin, draggable, dragging, onDragStart, onDragEnd, onDrop, onIcon, onToggle, onPublic, onEdit, onDelete }) {
   const hidden = tile.kind === 'service' && !tile.launchpad
-  const body = (
-    <>
-      <AppIcon icon={tile.icon} name={tile.name} size={40} />
-      <div style={{ minWidth: 0, flex: 1 }}>
-        <div style={{ fontWeight: 500, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{tile.name}</div>
-        <div style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {tile.subtitle}
-        </div>
-      </div>
-      {tile.status != null && (
-        <span title={tile.status ? 'Up' : 'Down'} style={{ width: 9, height: 9, borderRadius: '50%', flexShrink: 0,
-          background: STATUS_DOT[tile.status], boxShadow: tile.status ? 'none' : '0 0 6px var(--red)' }} />
-      )}
-    </>
-  )
-  const style = { display: 'flex', alignItems: 'center', gap: 12, padding: 12, marginBottom: 0, color: 'var(--text)',
-                  textDecoration: 'none', opacity: hidden ? 0.4 : 1, minHeight: 64 }
-  if (!editing) {
-    return tile.url
-      ? <a className="card" href={tile.url} target="_blank" rel="noreferrer" style={style}>{body}</a>
-      : <div className="card" style={{ ...style, opacity: 0.5 }} title="No URL — set one on the Services page">{body}</div>
-  }
   return (
-    <div className="card" style={{ ...style, flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>{body}</div>
-      <div style={{ display: 'flex', gap: 4 }}>
-        <button className="secondary" style={{ fontSize: 11, padding: '2px 8px' }} onClick={onIcon}>Icon</button>
+    <div className="card" draggable={draggable}
+      onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; onDragStart() }}
+      onDragEnd={onDragEnd}
+      onDragOver={e => { if (draggable) e.preventDefault() }}
+      onDrop={e => { e.preventDefault(); e.stopPropagation(); onDrop() }}
+      style={{ ...tileStyle, flexDirection: 'column', alignItems: 'stretch', gap: 8, cursor: draggable ? 'grab' : 'default',
+               opacity: dragging ? 0.35 : hidden ? 0.45 : 1, borderStyle: hidden ? 'dashed' : 'solid' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        {draggable && <span style={{ color: 'var(--text-muted)', fontSize: 14 }} title="Drag to move">⠿</span>}
+        <TileBody tile={tile} />
+      </div>
+      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+        <button className="secondary" style={smallBtn} onClick={onIcon}>Icon</button>
         {tile.kind === 'service'
-          ? <button className="secondary" style={{ fontSize: 11, padding: '2px 8px' }} onClick={onToggle}>{hidden ? 'Show' : 'Hide'}</button>
+          ? <button className="secondary" style={smallBtn} onClick={onToggle}>{hidden ? 'Show' : 'Hide'}</button>
           : <>
-              <button className="secondary" style={{ fontSize: 11, padding: '2px 8px' }} onClick={onEdit}>Edit</button>
-              <button className="secondary" style={{ fontSize: 11, padding: '2px 8px', color: 'var(--red)' }} onClick={onDelete}>✕</button>
+              <button className="secondary" style={smallBtn} onClick={onEdit}>Edit</button>
+              <button className="secondary" style={{ ...smallBtn, color: 'var(--red)' }} onClick={onDelete}>✕</button>
             </>}
+        {isAdmin && (
+          <button className="secondary" onClick={onPublic} title="Show on the home page without signing in"
+            style={{ ...smallBtn, marginLeft: 'auto', color: tile.public ? 'var(--green)' : 'var(--text-muted)',
+                     borderColor: tile.public ? 'var(--green)' : 'var(--border)' }}>
+            {tile.public ? '🌐 Public' : 'Private'}
+          </button>
+        )}
       </div>
     </div>
   )
@@ -167,13 +164,41 @@ function HeimdallImport({ api, onDone, onClose }) {
   )
 }
 
+
+function HomeSettings({ api, settings, onSaved }) {
+  const [enabled, setEnabled] = useState(settings.public_enabled)
+  const [title, setTitle] = useState(settings.title)
+  const [error, setError] = useState('')
+  async function save() {
+    try { onSaved(await call(api, `${API}/settings`, { method: 'PUT', body: JSON.stringify({ public_enabled: enabled, title }) })) }
+    catch (e) { setError(e.message) }
+  }
+  return (
+    <div className="card" style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', fontSize: 13 }}>
+      <b>Home page</b>
+      <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        <input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} />
+        Show 🌐 public tiles to visitors who aren't signed in
+      </label>
+      <input value={title} onChange={e => setTitle(e.target.value)} placeholder="Title" style={{ width: 160 }} />
+      <button className="secondary" onClick={save}>Save</button>
+      {error && <span style={{ color: 'var(--red)', fontSize: 12 }}>{error}</span>}
+      <span style={{ fontSize: 11, color: 'var(--text-muted)', flexBasis: '100%' }}>
+        Signed-in users always see every tile at <code>/home</code>. Behind Authentik, anonymous visitors only reach
+        it if the proxy lets <code>/home</code>, <code>/assets</code>, <code>/api/launchpad/public</code> and <code>/api/icons/file</code> through without login.
+      </span>
+    </div>
+  )
+}
+
 export default function LaunchpadPage() {
   const api = useApi()
   const { isAdmin } = useAuth()
   const [data, setData] = useState(null)
   const [q, setQ] = useState('')
   const [editing, setEditing] = useState(false)
-  const [picking, setPicking] = useState(null)        // tile whose icon is being changed
+  const [dragKey, setDragKey] = useState(null)
+  const [picking, setPicking] = useState(null)
   const [bookmarkForm, setBookmarkForm] = useState(null)
   const [showHeimdall, setShowHeimdall] = useState(false)
   const [notice, setNotice] = useState(null)
@@ -185,7 +210,6 @@ export default function LaunchpadPage() {
   }
   useEffect(() => { load() }, [])
 
-  // "/" focuses search from anywhere on the page
   useEffect(() => {
     const onKey = e => {
       if (e.key === '/' && document.activeElement?.tagName !== 'INPUT') { e.preventDefault(); searchRef.current?.focus() }
@@ -194,47 +218,62 @@ export default function LaunchpadPage() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  const tiles = useMemo(() => {
-    if (!data) return []
-    return [
-      ...data.services.map(s => ({ ...s, kind: 'service', key: `s${s.id}`, subtitle: s.host || (s.url || '').replace(/^https?:\/\//, '') })),
-      ...data.bookmarks.map(b => ({ ...b, kind: 'bookmark', key: `b${b.id}`, launchpad: true, status: null,
-                                   subtitle: b.description || b.url.replace(/^https?:\/\//, '') })),
-    ]
-  }, [data])
+  const tiles = useMemo(() => data ? buildTiles(data.services, data.bookmarks) : [], [data])
+  const visible = useMemo(() => tiles.filter(t => (editing || t.launchpad) && matches(t, q)), [tiles, q, editing])
+  const groups = useMemo(() => groupTiles(visible, data?.settings.group_order), [visible, data])
+  const canDrag = editing && !q.trim()   // positions are only meaningful with the full list showing
 
-  const visible = useMemo(() => {
-    const s = q.trim().toLowerCase()
-    return tiles.filter(t => (editing || t.launchpad) && (!s || [t.name, t.group, t.subtitle].some(v => v && v.toLowerCase().includes(s))))
-  }, [tiles, q, editing])
+  const fail = e => setNotice({ ok: false, text: e.message })
 
-  const groups = useMemo(() => {
-    const map = new Map()
-    for (const t of visible) {
-      if (!map.has(t.group)) map.set(t.group, [])
-      map.get(t.group).push(t)
-    }
-    return [...map.entries()].sort(([a], [b]) => a.localeCompare(b))
-  }, [visible])
-
-  async function setIcon(tile, icon) {
-    setPicking(null)
-    try {
-      if (tile.kind === 'service') await call(api, `${API}/services/${tile.id}`, { method: 'PATCH', body: JSON.stringify({ icon }) })
-      else await call(api, `${API}/bookmarks/${tile.id}`, { method: 'PUT', body: JSON.stringify({ ...tile, icon: icon || null }) })
-      load()
-    } catch (e) { setNotice({ ok: false, text: e.message }) }
+  /** Apply new {group, order} values locally, then persist them. */
+  function applyLayout(changes, groupOrder) {
+    const byKey = Object.fromEntries(changes.map(c => [`${c.kind === 'service' ? 's' : 'b'}${c.id}`, c]))
+    setData(d => ({
+      ...d,
+      settings: groupOrder ? { ...d.settings, group_order: groupOrder } : d.settings,
+      services: d.services.map(s => byKey[`s${s.id}`] ? { ...s, ...byKey[`s${s.id}`], kind: undefined } : s),
+      bookmarks: d.bookmarks.map(b => byKey[`b${b.id}`] ? { ...b, ...byKey[`b${b.id}`], kind: undefined } : b),
+    }))
+    call(api, `${API}/layout`, { method: 'PUT', body: JSON.stringify({ tiles: changes, group_order: groupOrder ?? null }) })
+      .catch(e => { fail(e); load() })
   }
 
-  async function toggle(tile) {
-    await call(api, `${API}/services/${tile.id}`, { method: 'PATCH', body: JSON.stringify({ launchpad: !tile.launchpad }) })
-      .catch(e => setNotice({ ok: false, text: e.message }))
+  /** Move the dragged tile before `beforeKey` (or to the end) of `targetGroup`. */
+  function moveTile(targetGroup, beforeKey = null) {
+    if (!dragKey || dragKey === beforeKey) return
+    const layout = new Map(groups.map(([g, list]) => [g, list.map(t => t.key)]))
+    const source = [...layout.entries()].find(([, keys]) => keys.includes(dragKey))?.[0]
+    if (source === undefined) return
+    layout.set(source, layout.get(source).filter(k => k !== dragKey))
+    const target = layout.get(targetGroup) ?? []
+    const at = beforeKey ? target.indexOf(beforeKey) : -1
+    target.splice(at === -1 ? target.length : at, 0, dragKey)
+    layout.set(targetGroup, target)
+    const byKey = Object.fromEntries(tiles.map(t => [t.key, t]))
+    const changes = [...new Set([source, targetGroup])].flatMap(g =>
+      layout.get(g).map((key, i) => ({ kind: byKey[key].kind, id: byKey[key].id, group: g, order: (i + 1) * 10 })))
+    applyLayout(changes)
+    setDragKey(null)
+  }
+
+  function moveGroup(group, dir) {
+    const names = groups.map(([g]) => g)
+    const i = names.indexOf(group)
+    const j = i + dir
+    if (j < 0 || j >= names.length) return
+    ;[names[i], names[j]] = [names[j], names[i]]
+    applyLayout([], names)
+  }
+
+  async function patchTile(tile, body) {
+    await call(api, `${API}/${tile.kind === 'service' ? 'services' : 'bookmarks'}/${tile.id}`, { method: 'PATCH', body: JSON.stringify(body) })
+      .catch(fail)
     load()
   }
 
   async function removeBookmark(tile) {
     if (!confirm(`Delete bookmark ${tile.name}?`)) return
-    await call(api, `${API}/bookmarks/${tile.id}`, { method: 'DELETE' }).catch(e => setNotice({ ok: false, text: e.message }))
+    await call(api, `${API}/bookmarks/${tile.id}`, { method: 'DELETE' }).catch(fail)
     load()
   }
 
@@ -243,25 +282,23 @@ export default function LaunchpadPage() {
       const r = await call(api, '/api/icons/auto-assign', { method: 'POST' })
       setNotice({ ok: true, text: `Icons assigned to ${r.assigned.length}` + (r.missing.length ? ` · no match for ${r.missing.join(', ')}` : '') })
       load()
-    } catch (e) { setNotice({ ok: false, text: e.message }) }
+    } catch (e) { fail(e) }
   }
 
   async function exportLaunchpad() {
     try {
-      const data = await call(api, `${API}/export`)
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+      const payload = await call(api, `${API}/export`)
       const a = document.createElement('a')
-      a.href = URL.createObjectURL(blob)
+      a.href = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }))
       a.download = `baumlab-launchpad-${new Date().toISOString().slice(0, 10)}.json`
       a.click()
       URL.revokeObjectURL(a.href)
-    } catch (e) { setNotice({ ok: false, text: e.message }) }
+    } catch (e) { fail(e) }
   }
 
   async function importLaunchpad(file) {
     try {
-      const payload = JSON.parse(await file.text())
-      const r = await call(api, `${API}/import`, { method: 'POST', body: JSON.stringify(payload) })
+      const r = await call(api, `${API}/import`, { method: 'POST', body: await file.text() })
       setNotice({ ok: true, text: `Imported: ${r.services_updated} services updated, ${r.services_created} created, ${r.bookmarks} bookmarks` })
       load()
     } catch (e) { setNotice({ ok: false, text: `Import failed: ${e.message}` }) }
@@ -283,6 +320,8 @@ export default function LaunchpadPage() {
         <input ref={searchRef} autoFocus value={q} onChange={e => setQ(e.target.value)} onKeyDown={onSearchKey}
           placeholder="Search…  (/ to focus, Enter opens first)" style={{ width: 300 }} />
         <button className={editing ? '' : 'secondary'} onClick={() => setEditing(v => !v)}>{editing ? 'Done' : '✎ Edit'}</button>
+        <a href="/home" target="_blank" rel="noreferrer" className="secondary"
+          style={{ fontSize: 13, color: 'var(--accent)', marginLeft: 4 }}>Home page ↗</a>
         {editing && <button className="secondary" onClick={() => setBookmarkForm({})}>+ Bookmark</button>}
         {isAdmin && editing && <>
           <button className="secondary" onClick={autoIcons}>Auto-assign icons</button>
@@ -294,6 +333,13 @@ export default function LaunchpadPage() {
         </>}
       </div>
 
+      {editing && (
+        <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '-6px 0 12px' }}>
+          {canDrag ? 'Drag tiles to reorder or move them between groups; ↑↓ reorder groups.' : 'Clear the search to drag tiles.'}
+          {' '}Dashed tiles are hidden from the Launchpad.
+        </p>
+      )}
+
       {notice && (
         <div style={{ fontSize: 12, marginBottom: 12, padding: '8px 12px', borderRadius: 6, display: 'flex', justifyContent: 'space-between',
           color: notice.ok ? 'var(--green)' : 'var(--red)', border: `1px solid ${notice.ok ? 'var(--green)' : 'var(--red)'}` }}>
@@ -301,6 +347,8 @@ export default function LaunchpadPage() {
         </div>
       )}
 
+      {isAdmin && editing && <HomeSettings api={api} settings={data.settings}
+        onSaved={settings => { setData(d => ({ ...d, settings })); setNotice({ ok: true, text: 'Home page settings saved' }) }} />}
       {showHeimdall && <HeimdallImport api={api} onClose={() => setShowHeimdall(false)}
         onDone={text => { setShowHeimdall(false); setNotice({ ok: true, text }); load() }} />}
       {bookmarkForm && <BookmarkForm api={api} initial={bookmarkForm} groups={groupNames}
@@ -314,20 +362,31 @@ export default function LaunchpadPage() {
       )}
       {tiles.length > 0 && visible.length === 0 && <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>No matches for “{q}”.</div>}
 
-      {groups.map(([group, list]) => (
-        <section key={group} style={{ marginBottom: 20 }}>
-          <h2 style={{ marginBottom: 8 }}>{group}</h2>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
-            {list.map(t => (
-              <Tile key={t.key} tile={t} editing={editing} onIcon={() => setPicking(t)} onToggle={() => toggle(t)}
+      {groups.map(([group, list], gi) => (
+        <section key={group} style={{ marginBottom: 20 }}
+          onDragOver={e => { if (canDrag) e.preventDefault() }}
+          onDrop={e => { e.preventDefault(); moveTile(group) }}>
+          <h2 style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+            {group}
+            {canDrag && <>
+              <button className="secondary" style={smallBtn} disabled={gi === 0} onClick={() => moveGroup(group, -1)}>↑</button>
+              <button className="secondary" style={smallBtn} disabled={gi === groups.length - 1} onClick={() => moveGroup(group, 1)}>↓</button>
+            </>}
+          </h2>
+          <div style={{ ...gridStyle, minHeight: canDrag ? 70 : undefined }}>
+            {list.map(t => editing ? (
+              <EditTile key={t.key} tile={t} isAdmin={isAdmin} draggable={canDrag} dragging={dragKey === t.key}
+                onDragStart={() => setDragKey(t.key)} onDragEnd={() => setDragKey(null)} onDrop={() => moveTile(group, t.key)}
+                onIcon={() => setPicking(t)} onToggle={() => patchTile(t, { launchpad: !t.launchpad })}
+                onPublic={() => patchTile(t, { public: !t.public })}
                 onEdit={() => setBookmarkForm(t)} onDelete={() => removeBookmark(t)} />
-            ))}
+            ) : <TileLink key={t.key} tile={t} />)}
           </div>
         </section>
       ))}
 
       {picking && <IconPicker name={picking.name} current={picking.icon} onClose={() => setPicking(null)}
-        onPick={icon => setIcon(picking, icon)} />}
+        onPick={icon => { setPicking(null); patchTile(picking, { icon }) }} />}
     </div>
   )
 }
