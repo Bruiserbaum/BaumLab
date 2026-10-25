@@ -15,6 +15,7 @@ import DashboardPage from './pages/DashboardPage'
 import CertificatesPage from './pages/CertificatesPage'
 import LaunchpadPage from './pages/LaunchpadPage'
 import HomePage from './pages/HomePage'
+import TerminalPage from './pages/TerminalPage'
 import NetworkMapPage from './pages/NetworkMapPage'
 import UsersPage from './pages/UsersPage'
 import SettingsPage from './pages/SettingsPage'
@@ -82,6 +83,7 @@ function App() {
           <NavLink to="/certificates">Certificates</NavLink>
 
           <div className="nav-section">Tools</div>
+          {isAdmin && <NavLink to="/terminal">Terminal</NavLink>}
           <NavLink to="/tools">Tools</NavLink>
           <NavLink to="/repos">Repositories</NavLink>
 
@@ -120,6 +122,7 @@ function App() {
             <Route path="/services" element={<ServicesPage />} />
             <Route path="/vault" element={<VaultPage />} />
             <Route path="/tools" element={<ToolsPage />} />
+            <Route path="/terminal" element={<TerminalPage />} />
             <Route path="/repos" element={<ReposPage />} />
             <Route path="/backups" element={<BackupsPage />} />
             <Route path="/alerts" element={<AlertsPage />} />

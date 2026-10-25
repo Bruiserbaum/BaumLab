@@ -12,6 +12,7 @@ from .models import backup as _backup_models  # noqa: F401
 from .models import alert as _alert_models  # noqa: F401
 from .models import cert as _cert_models  # noqa: F401
 from .models import bookmark as _bookmark_models  # noqa: F401
+from .models import terminal as _terminal_models  # noqa: F401
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./data/baumlab.db")
 
