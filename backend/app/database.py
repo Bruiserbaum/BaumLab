@@ -43,6 +43,9 @@ def migrate_db():
         "ALTER TABLE service ADD COLUMN launchpad_group TEXT",
         "ALTER TABLE service ADD COLUMN launchpad_order INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE service ADD COLUMN launchpad_public BOOLEAN NOT NULL DEFAULT 0",
+        "ALTER TABLE service ADD COLUMN container_connection TEXT",
+        "ALTER TABLE service ADD COLUMN container_endpoint_id INTEGER",
+        "ALTER TABLE service ADD COLUMN container_name TEXT",
         'ALTER TABLE bookmark ADD COLUMN "order" INTEGER NOT NULL DEFAULT 0',
         "ALTER TABLE bookmark ADD COLUMN public BOOLEAN NOT NULL DEFAULT 0",
     ]

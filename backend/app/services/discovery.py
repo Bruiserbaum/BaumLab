@@ -15,7 +15,7 @@ from ..models.service import Service
 
 # port → (name, category, protocol)
 KNOWN_PORTS: dict[int, tuple[str, Optional[str], str]] = {
-    22:    ("SSH", "Infrastructure", "tcp"),
+    22:    ("SSH", "Infrastructure", "ssh"),
     53:    ("DNS", "Networking", "tcp"),
     80:    ("Web (HTTP)", None, "http"),
     81:    ("Nginx Proxy Manager", "Networking", "http"),
@@ -124,6 +124,38 @@ def _protocol_for(port: Optional[int], private: Optional[int] = None) -> str:
     return "http"
 
 
+def container_suggestion(c: ContainerSnapshot) -> dict:
+    """A service proposal for one Portainer container, linked to that container."""
+    try:
+        ports = json.loads(c.ports) if c.ports else []
+    except ValueError:
+        ports = []
+    display, category = _hint(c.image, c.name)
+    primary = _primary_port(ports)
+    port = primary["public"] if primary else None
+    others = [f"{p['public']}/{p['proto']}" for p in ports if p is not primary]
+    notes = f"Container {c.name} ({c.image})" + (f" · other ports: {', '.join(others)}" if others else "")
+    return {
+        "key": f"c:{c.connection_name}:{c.endpoint_id}:{c.container_id}",
+        "source": "docker",
+        "name": display or c.name,
+        "_fallback_name": c.name,
+        "category": category,
+        "host": c.endpoint_name,
+        "platform": "docker",
+        "ip": c.host or None,
+        "port": port,
+        "protocol": _protocol_for(port, primary.get("private") if primary else None) if port else "http",
+        "vlan": None,
+        "notes": notes,
+        "container_connection": c.connection_name,
+        "container_endpoint_id": c.endpoint_id,
+        "container_name": c.name,
+        # Unticked by default: databases and containers nobody reaches directly
+        "selected": category != "Database" and (port is not None or display is not None),
+    }
+
+
 def discover(session: Session) -> dict:
     existing = session.exec(select(Service)).all()
     taken_addr = {(s.ip, s.port) for s in existing if s.ip and s.port}
@@ -152,32 +184,10 @@ def discover(session: Session) -> dict:
         select(ContainerSnapshot).where(ContainerSnapshot.state == "running")
         .order_by(ContainerSnapshot.endpoint_name, ContainerSnapshot.name)
     ).all()
+    linked = {(s.container_connection, s.container_endpoint_id, s.container_name) for s in existing if s.container_name}
     for c in containers:
-        try:
-            ports = json.loads(c.ports) if c.ports else []
-        except ValueError:
-            ports = []
-        display, category = _hint(c.image, c.name)
-        primary = _primary_port(ports)
-        port = primary["public"] if primary else None
-        others = [f"{p['public']}/{p['proto']}" for p in ports if p is not primary]
-        notes = f"Container {c.name} ({c.image})" + (f" · other ports: {', '.join(others)}" if others else "")
-        add({
-            "key": f"c:{c.connection_name}:{c.endpoint_id}:{c.container_id}",
-            "source": "docker",
-            "name": display or c.name,
-            "_fallback_name": c.name,
-            "category": category,
-            "host": c.endpoint_name,
-            "platform": "docker",
-            "ip": c.host or None,
-            "port": port,
-            "protocol": _protocol_for(port, primary.get("private") if primary else None) if port else "http",
-            "vlan": None,
-            "notes": notes,
-            # Unticked by default: databases and containers nobody reaches directly
-            "selected": category != "Database" and (port is not None or display is not None),
-        })
+        if (c.connection_name, c.endpoint_id, c.name) not in linked:
+            add(container_suggestion(c))
 
     # Device port scans — named by the well-known port map
     devices = session.exec(select(Device).order_by(Device.ip)).all()

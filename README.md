@@ -25,7 +25,8 @@ A self-hosted home lab monitoring, mapping, and security dashboard. Discover eve
 - **Group by** category, host, VLAN, platform, or access type, with search
 - **Device & monitor linking** — IP suggestions (and VLAN auto-fill) from discovered devices; link a monitor to show live up/down
 - **Discovery** — suggests services from running Docker containers (via Portainer) and device port scans; review, edit and add in bulk
-- **Linked pieces** — creating a service can also create its health monitor and a vault entry for its login
+- **Linked pieces**: creating a service can also create its health monitor and a vault entry for its login. **SSH services** (protocol `ssh`) are added to the Terminal using that login.
+- **Docker containers**: link a service to its container (Platform: docker). The service shows the live container state, and clicking it gives start / stop / restart and logs through Portainer. The Docker page shows each container's service, with **+ Service** to add unlinked ones.
 - **Lifecycle status** — active / planned / decommissioned (with date), so retired services stay in the history
 - **Credentials pointer** — link each service to its Vaultwarden item (BaumLab never stores the secret)
 - **Export to PDF** — printer-friendly inventory with check-off boxes for auditing what you actually have running

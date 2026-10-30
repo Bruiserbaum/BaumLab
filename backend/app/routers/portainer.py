@@ -8,7 +8,7 @@ from ..database import get_session, engine
 from ..models.portainer import ContainerSnapshot
 from ..services.auth import get_current_user, require_admin
 from ..services.config_service import read_config, write_config, encrypt, decrypt
-from ..services.portainer_client import fetch_containers, upsert_containers
+from ..services.portainer_client import fetch_containers, upsert_containers, container_action, container_logs
 
 router = APIRouter(prefix="/api/portainer", tags=["portainer"],
                    dependencies=[Depends(get_current_user)])
@@ -145,3 +145,34 @@ async def _poll_all():
             print(f"Portainer '{name}': {len(containers)} containers updated")
         except Exception as e:
             print(f"Portainer poll failed for '{name}': {e}")
+
+
+# ── Container actions ──────────────────────────────────────────────────────────
+
+class ContainerActionIn(BaseModel):
+    connection: str
+    endpoint_id: int
+    container: str           # container id or name
+    action: str              # start | stop | restart
+
+
+@router.post("/containers/action", dependencies=[Depends(require_admin)])
+async def run_container_action(data: ContainerActionIn):
+    try:
+        await container_action(data.connection, data.endpoint_id, data.container, data.action)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    await _poll_all()          # refresh states so the UI shows the result straight away
+    return {"ok": True}
+
+
+@router.get("/containers/logs", dependencies=[Depends(require_admin)])
+async def get_container_logs(connection: str, endpoint_id: int, container: str, tail: int = 200):
+    try:
+        return {"logs": await container_logs(connection, endpoint_id, container, min(max(tail, 10), 2000))}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))

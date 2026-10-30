@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
-import { useAuth } from '../auth'
+import { useApi } from '../auth'
 
 const API = import.meta.env.VITE_API_URL ?? ''
 
@@ -13,7 +13,7 @@ const SEV_COLORS = {
 const REFRESH_MS = 10_000
 
 export default function SyslogPage() {
-  const { api } = useAuth()
+  const api = useApi()
   const [messages, setMessages] = useState([])
   const [stats, setStats] = useState(null)
   const [severityMax, setSeverityMax] = useState(7)
