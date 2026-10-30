@@ -26,6 +26,7 @@ EVENTS = {
     "backup_stale":     "Backup becomes stale (missed its schedule)",
     "new_device":       "New device appears on the network",
     "cert_expiring":    "TLS certificate expires within 21 days (again at 7 days and on expiry)",
+    "integrity":        "Background health check finds a problem it can't fix itself",
     "update_available": "BaumLab update available",
 }
 CHANNEL_TYPES = ("ntfy", "discord", "email", "webhook")

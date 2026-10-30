@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useApi } from '../auth'
 
 const API = import.meta.env.VITE_API_URL ?? ''
@@ -19,6 +20,8 @@ export default function SyslogPage() {
   const [severityMax, setSeverityMax] = useState(7)
   const [host, setHost] = useState('')
   const [search, setSearch] = useState('')
+  const [params] = useSearchParams()
+  const [source, setSource] = useState(params.get('source') || '')   // '' | network | container
   const [loading, setLoading] = useState(false)
   const [selected, setSelected] = useState(null)
   const intervalRef = useRef(null)
@@ -29,6 +32,7 @@ export default function SyslogPage() {
       const params = new URLSearchParams({ severity_max: severityMax, limit: 500 })
       if (host) params.set('host', host)
       if (search) params.set('search', search)
+      if (source) params.set('source', source)
       const [msgR, statR] = await Promise.all([
         api(`${API}/api/syslog?${params}`),
         api(`${API}/api/syslog/stats`),
@@ -38,7 +42,7 @@ export default function SyslogPage() {
     } finally {
       setLoading(false)
     }
-  }, [api, severityMax, host, search])
+  }, [api, severityMax, host, search, source])
 
   useEffect(() => {
     load()
@@ -61,6 +65,11 @@ export default function SyslogPage() {
           <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>
             Total: <b style={{ color: 'var(--text)' }}>{stats.total.toLocaleString()}</b>
           </span>
+          {stats.by_source && Object.entries(stats.by_source).map(([src, n]) => (
+            <span key={src} style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+              {src === 'container' ? 'Containers' : 'Network'}: <b style={{ color: 'var(--text)' }}>{n.toLocaleString()}</b>
+            </span>
+          ))}
           {Object.entries(stats.by_severity).map(([sev, n]) => (
             <span key={sev} style={{ fontSize: 13 }}>
               <span style={{ color: SEV_COLORS[sev] ?? 'var(--text-muted)' }}>{sev}:</span>{' '}
@@ -72,6 +81,11 @@ export default function SyslogPage() {
 
       {/* Toolbar */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <select value={source} onChange={e => setSource(e.target.value)} style={{ width: 170 }} title="Where the messages came from">
+          <option value="">All sources</option>
+          <option value="network">Network devices (UDP)</option>
+          <option value="container">BaumLab containers</option>
+        </select>
         <select
           value={severityMax}
           onChange={e => setSeverityMax(Number(e.target.value))}

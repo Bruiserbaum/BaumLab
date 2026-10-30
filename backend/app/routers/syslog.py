@@ -16,11 +16,14 @@ def list_messages(
     severity_max: int = Query(7, ge=0, le=7, description="Max severity (0=Emerg, 7=Debug)"),
     host: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
+    source: Optional[str] = Query(None, description="network (UDP syslog) or container (BaumLab-collected Docker logs)"),
     limit: int = Query(200, ge=1, le=2000),
     offset: int = Query(0, ge=0),
     session: Session = Depends(get_session),
 ):
     q = select(SyslogMessage).where(SyslogMessage.severity <= severity_max)
+    if source:
+        q = q.where(SyslogMessage.source == source)
     if host:
         q = q.where(SyslogMessage.host.contains(host))
     if search:
@@ -58,9 +61,13 @@ def stats(session: Session = Depends(get_session)):
         .order_by(func.count().desc())
         .limit(10)
     ).all()
+    by_source = dict(session.exec(
+        select(SyslogMessage.source, func.count()).group_by(SyslogMessage.source)
+    ).all())
     return {
         "total": total,
         "by_severity": by_severity,
+        "by_source": by_source,
         "top_hosts": [{"host": h, "count": c} for h, c in hosts],
     }
 

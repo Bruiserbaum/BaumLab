@@ -12,7 +12,7 @@ from ..models.device import Device
 from ..models.portainer import ContainerSnapshot
 from ..models.service import Service
 from ..models.user import User
-from ..services import backup_schedule, certs, updater
+from ..services import backup_schedule, certs, integrity, updater
 from ..services.auth import get_current_user
 from .status import public_status
 
@@ -79,6 +79,12 @@ def dashboard(user: User = Depends(get_current_user), session: Session = Depends
     upd = updater.status()
     if upd.get("update_available"):
         attention.append({"severity": "info", "text": f"BaumLab {upd['latest_tag']} is available", "link": "/settings"})
+
+    # Problems the background health check couldn't fix itself
+    for f in integrity.last_results().get("findings", []):
+        if f["severity"] in ("warning", "error"):
+            attention.append({"severity": "critical" if f["severity"] == "error" else "warning",
+                              "text": f"{f['check']}: {f['text']}", "link": "/health"})
 
     order = {"critical": 0, "warning": 1, "info": 2}
     result = {

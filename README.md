@@ -113,6 +113,12 @@ A self-hosted home lab monitoring, mapping, and security dashboard. Discover eve
 - Issuer, covered names, expiry date, trusted vs self-signed; checked daily or on demand
 - Alerts at 21 days, 7 days and on expiry
 
+### Health (self-maintenance)
+- **Background consistency checks** every 15 minutes (and on demand, Admin → Health). These keep linked pieces in sync and repair what's safe automatically: SSH services ↔ Terminal hosts, links to deleted vault entries / monitors / services, Docker services ↔ containers, backup job service lists, missing icons, and backup schedules that dropped out of the scheduler.
+- **Reports what needs a decision**, with one alert per problem: a vanished container, a Terminal host without a login, an unreachable OpenVAS, stale Portainer data, failing Git sync, a locked vault, a missing Docker socket.
+- **Restart clean-up**: backup runs and terminal sessions interrupted by a restart are closed out at start-up instead of showing "running" forever.
+- **BaumLab's own logs in Syslog**: container output (api, ui, OpenVAS, or any containers you pick) is collected through the Docker socket and filed under each container's name, with a severity guessed from the text. Container logs and network syslog have separate retention limits.
+
 ### Alerts
 - **Channels**: ntfy, Discord, email (SMTP), generic JSON webhook (Gotify, Home Assistant, …), each with a minimum severity and a test button
 - **Events**: monitor down / recovered (after N failed checks in a row), backup failed or finished with warnings, backup stale, new device (unknown MAC), BaumLab update available
