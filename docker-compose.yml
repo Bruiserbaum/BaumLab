@@ -95,7 +95,8 @@ services:
     environment:
       - USERNAME=${OPENVAS_ADMIN_USERNAME:-admin}
       - PASSWORD=${OPENVAS_ADMIN_PASSWORD:-changeme}
-    # No published ports: BaumLab reaches OpenVAS over the private stack network (openvas:9390).
+    # No published ports: BaumLab talks to gvmd over the shared Unix socket (gvmd-socket volume);
+    # this image does not listen for GMP on TCP 9390, so leave Host blank in Settings.
     # To open Greenbone's own web UI on your LAN, add:  ports: ["9392:9392"]
     networks:
       - baumlab

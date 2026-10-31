@@ -27,7 +27,7 @@ from .services.syslog_listener import start_syslog_listener
 from .routers.portainer import _poll_all
 from .routers.scan import _upsert_devices
 
-APP_VERSION = "1.6.0"  # bump this on every release (minor bump for every merged branch)
+APP_VERSION = "1.7.0"  # bump this on every release (minor bump for every merged branch)
 
 scheduler = AsyncIOScheduler()
 

@@ -258,15 +258,15 @@ export default function SettingsPage() {
             Vulnerability scanner powered by{' '}
             <a href="https://www.greenbone.net/" target="_blank" rel="noreferrer"
               style={{ color: 'var(--accent)' }}>Greenbone Community Edition</a>.
-            Credentials stored encrypted. Connect via Unix socket (Docker) or TLS host.
+            Credentials stored encrypted. The bundled container is reached over its Unix socket; a remote GVM over TLS.
           </p>
 
-          <Field label="Unix Socket Path" hint="Docker: /var/run/gvmd/gvmd.sock — leave Host blank to use socket">
+          <Field label="Unix Socket Path" hint="The bundled OpenVAS container: /var/run/gvmd/gvmd.sock">
             <input value={openvas.socket_path}
               onChange={e => setOpenVas(o => ({ ...o, socket_path: e.target.value }))}
               placeholder="/var/run/gvmd/gvmd.sock" />
           </Field>
-          <Field label="Host" hint="Override socket — e.g. 192.168.1.50 for remote GVM">
+          <Field label="Host" hint="Leave blank for the bundled container (it only accepts the socket). Set only for a remote GVM with TLS GMP enabled">
             <input value={openvas.host}
               onChange={e => setOpenVas(o => ({ ...o, host: e.target.value }))}
               placeholder="Leave blank to use socket" />

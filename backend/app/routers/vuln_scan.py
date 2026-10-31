@@ -1,3 +1,4 @@
+import os
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -67,10 +68,20 @@ def health():
     except HTTPException:
         return {"connected": False, "error": "OpenVAS not configured"}
     result = svc.check_connection()
-    if not result.get("connected") and svc.host and "name resolution" in str(result.get("error", "")).lower():
+    if result.get("connected"):
+        return result
+    err = str(result.get("error", "")).lower()
+    if svc.host and "name resolution" in err:
         hint = _diagnose_container(svc.host)
         if hint:
             result["error"] = f"Can't find '{svc.host}' — {hint}"
+    elif svc.host and "refused" in err and os.path.exists(svc.socket_path):
+        # The bundled immauss container only serves GMP on its Unix socket
+        result["error"] = (f"Nothing is listening on {svc.host}:{svc.port}. The bundled OpenVAS container only "
+                           f"accepts the Unix socket — clear the Host field and keep Socket Path {svc.socket_path}.")
+    elif not svc.host and ("no such file" in err or "refused" in err):
+        result["error"] = (f"gvmd hasn't opened {svc.socket_path} yet. It appears once the first feed import "
+                           f"finishes — watch for 'ready to accept GMP connections' in docker logs baumlab-openvas.")
     return result
 
 
