@@ -28,6 +28,9 @@ def init(scheduler):
             schedule_stack(stack)
         for kit in s.exec(select(RecoveryKit)).all():
             schedule_kit(kit)
+    # Every Sunday morning, download each kit's newest archive and check it end to end
+    scheduler.add_job(recovery_kits.verify_all, CronTrigger.from_crontab("0 5 * * 0"), id="verify_kits",
+                      replace_existing=True, misfire_grace_time=6 * 3600, coalesce=True, max_instances=1)
 
 
 def parse_cron(expr: str) -> CronTrigger:

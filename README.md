@@ -87,6 +87,8 @@ A self-hosted home lab monitoring, mapping, and security dashboard. Discover eve
   - live dumps of Postgres, MySQL / MariaDB and MongoDB containers, using the credentials already in their environment
   - a `RESTORE.md` with step-by-step manual rebuild instructions for that service
   - **one-click restore** to any Portainer environment: recreate volumes and folders, copy the data back, deploy the stack with its environment, optionally import the database dumps
+  - **Hardened**: dumps are retried and checked for their end marker; if one still fails, the service is stopped and its files copied cold instead, then started again (databases first) and watched until it's running and healthy — with a critical alert if it doesn't come back. Every copy is re-read to catch truncation, scratch space is checked before and during the run, the packed kit is re-read before upload, the uploaded size is confirmed at the destination, and old kits are only pruned after a complete one is stored
+  - **Weekly verification** (and a Verify button): the newest kit is downloaded and checked end to end — archive integrity, every data copy and dump, the compose file, and that the current passphrase still opens its secrets
 - **Container jobs**: archive Docker volumes and bind mounts, optional PostgreSQL / MySQL dump, optionally stop containers for a consistent copy (restarted before the upload), cron schedules and retention
 - **Stack backups** for disaster recovery: a compose project's named volumes, its environment (encrypted) and the repo it deploys from
 - **Destinations**: Backblaze B2, SMB / NAS, SFTP, local folder (via rclone; credentials stay encrypted and are only handed to rclone while it runs)

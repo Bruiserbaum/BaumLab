@@ -67,6 +67,12 @@ class PortainerDocker:
         r = self.http.get(self._d(f"/volumes/{name}"))
         return r.json() if r.status_code == 200 else None
 
+    def volume_sizes(self) -> dict[str, int]:
+        """{volume name: bytes} from `docker system df` — used to check scratch space before a backup."""
+        r = self.http.get(self._d("/system/df"), params={"type": "volume"}, timeout=httpx.Timeout(180.0))
+        _check(r, "Volume sizes")
+        return {v["Name"]: int((v.get("UsageData") or {}).get("Size") or 0) for v in r.json().get("Volumes") or []}
+
     def archive_to_file(self, container: str, path: str, out_path: str) -> int:
         """Tar of a path inside the container (works on stopped containers too). Returns bytes written."""
         size = 0

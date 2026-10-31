@@ -50,6 +50,10 @@ def migrate_db():
         "ALTER TABLE service ADD COLUMN container_name TEXT",
         'ALTER TABLE bookmark ADD COLUMN "order" INTEGER NOT NULL DEFAULT 0',
         "ALTER TABLE bookmark ADD COLUMN public BOOLEAN NOT NULL DEFAULT 0",
+        "ALTER TABLE recoverykit ADD COLUMN cold_copy_fallback BOOLEAN NOT NULL DEFAULT 1",
+        "ALTER TABLE recoverykit ADD COLUMN last_verified_at DATETIME",
+        "ALTER TABLE recoverykit ADD COLUMN last_verify_status TEXT",
+        "ALTER TABLE recoverykit ADD COLUMN last_verify_message TEXT",
     ]
     with engine.connect() as conn:
         for stmt in migrations:

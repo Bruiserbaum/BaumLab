@@ -24,7 +24,7 @@ from datetime import datetime
 from typing import Optional
 
 import yaml
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from ..database import engine
 from ..models.backup import BackupDestination, RecoveryKit
@@ -219,6 +219,134 @@ def reconstruct(d: PortainerDocker, inspects: list[dict], stack_env: dict) -> st
     return header + yaml.safe_dump(doc, sort_keys=False, default_flow_style=False)
 
 
+# ── Hardening helpers ──────────────────────────────────────────────────────────
+
+MIN_FREE = 1 << 30              # never start or continue a kit with less than 1 GiB of scratch space
+RETRY_DELAY = 10                # seconds before retrying a failed copy / dump / upload
+START_TIMEOUT = 180             # how long containers get to come back (and turn healthy) after a cold copy
+
+# pg_dumpall and mysqldump end with a marker; a dump without it was cut off part-way
+_DUMP_END = {"postgres": b"PostgreSQL database cluster dump complete", "mysql": b"-- Dump completed"}
+
+
+def _gib(n: int) -> str:
+    return f"{n / (1 << 30):.1f} GiB"
+
+
+def _ensure_space(need: int, what: str):
+    free = shutil.disk_usage(dk.BACKUP_TMP_DIR).free
+    if free < need:
+        raise RuntimeError(f"Not enough scratch space in {dk.BACKUP_TMP_DIR} for {what}: {_gib(free)} free, "
+                           f"about {_gib(need)} needed — free up space or exclude large mounts")
+
+
+def _retry(run: _Run, what: str, fn, attempts: int = 2):
+    for attempt in range(1, attempts + 1):
+        try:
+            return fn()
+        except Exception as e:
+            if attempt == attempts:
+                raise
+            run.log(f"  {what} failed ({e}) — retrying in {RETRY_DELAY}s")
+            time.sleep(RETRY_DELAY)
+
+
+def dump_problem(kind: str, path: str) -> Optional[str]:
+    """Why a database dump can't be trusted, or None if it looks complete."""
+    size = os.path.getsize(path) if os.path.exists(path) else 0
+    if size == 0:
+        return "the dump is empty"
+    if kind not in _DUMP_END:
+        return None                              # mongodump archives have no text end marker
+    with open(path, "rb") as fh:
+        fh.seek(max(0, size - 4096))
+        tail = fh.read()
+    return None if _DUMP_END[kind] in tail else "the dump is incomplete (no end marker — it was cut off)"
+
+
+def tar_problem(path: str) -> Optional[str]:
+    """Read a tar (or tar.gz) all the way through — catches truncated copies and corrupt archives."""
+    try:
+        count = 0
+        with tarfile.open(path) as t:
+            for member in t:
+                count += 1
+                if member.isreg():
+                    fh = t.extractfile(member)
+                    while fh.read(1 << 20):
+                        pass
+        return None if count else "the copy is empty"
+    except (tarfile.TarError, OSError, EOFError, ValueError) as e:
+        return f"the copy is unreadable ({e})"
+
+
+def _start_verified(d: PortainerDocker, run: _Run, ids: list[str]) -> list[str]:
+    """Start containers (databases first) and wait until each is running and not unhealthy.
+    Returns the names of any that didn't come back."""
+    for cid in ids:
+        try:
+            _retry(run, "Start", lambda: d.start(cid), attempts=3)
+        except Exception as e:
+            run.log(f"  Couldn't start {cid[:12]}: {e}", warning=True)
+    deadline = time.monotonic() + START_TIMEOUT
+    pending = list(ids)
+    while pending and time.monotonic() < deadline:
+        time.sleep(5)
+        still = []
+        for cid in pending:
+            try:
+                state = d.inspect(cid).get("State") or {}
+            except Exception:
+                still.append(cid)
+                continue
+            health = (state.get("Health") or {}).get("Status")
+            if not state.get("Running"):
+                try:
+                    d.start(cid)                 # exited straight away — give it another push
+                except Exception:
+                    pass
+                still.append(cid)
+            elif health in ("starting", "unhealthy"):
+                still.append(cid)
+        pending = still
+    failed = []
+    for cid in pending:
+        try:
+            ins = d.inspect(cid)
+            failed.append(f"{ins['Name'].lstrip('/')} ({(ins.get('State') or {}).get('Status')}"
+                          f"{', ' + ins['State']['Health']['Status'] if (ins.get('State') or {}).get('Health') else ''})")
+        except Exception:
+            failed.append(cid[:12])
+    return failed
+
+
+def _service_down_alert(kit: RecoveryKit, failed: list[str]):
+    from . import alerts
+    try:
+        alerts.notify("backup_failed", severity="critical", title=f"🛑 {kit.name} didn't come back after its backup",
+                      message=f"BaumLab stopped {kit.name} to copy its files and these containers aren't running/healthy "
+                              f"again: {', '.join(failed)}. Check them in Portainer.", url=alerts.link("/portainer"))
+    except Exception as e:
+        print(f"Recovery kit alert failed: {e}")
+
+
+def _verified_upload(run: _Run, dest: BackupDestination, archive: str, sub_dir: str):
+    """Upload, then confirm the destination holds a file of exactly the same size (re-uploading once if not)."""
+    size, name = os.path.getsize(archive), os.path.basename(archive)
+    for attempt in (1, 2):
+        ok, msg = st.upload(dest, archive, sub_dir)
+        if ok:
+            remote = next((a for a in st.list_archives(dest, sub_dir) if a["name"] == name), None)
+            if remote and int(remote["size"]) == size:
+                run.log(f"  Upload verified: {size:,} bytes at the destination")
+                return
+            msg = f"destination has {remote['size'] if remote else 'no'} bytes, expected {size:,}"
+        if attempt == 1:
+            run.log(f"  Upload problem ({msg}) — retrying in {RETRY_DELAY}s")
+            time.sleep(RETRY_DELAY)
+    raise RuntimeError(f"Upload failed: {msg}")
+
+
 # ── Backup ─────────────────────────────────────────────────────────────────────
 
 def _load(kit_id: int) -> tuple[Optional[RecoveryKit], Optional[BackupDestination]]:
@@ -238,10 +366,15 @@ def _targets(d: PortainerDocker, kit: RecoveryKit) -> list[dict]:
     return found
 
 
+def _image_of(ins: dict) -> str:
+    return (ins.get("Config") or {}).get("Image", "")
+
+
 def run_kit_backup(kit_id: int):
     if not _claim("kit", kit_id):
         return
     run: Optional[_Run] = None
+    kit = None
     tmp_dir = archive = None
     stopped: list[str] = []
     d: Optional[PortainerDocker] = None
@@ -255,6 +388,8 @@ def run_kit_backup(kit_id: int):
         passphrase = rc.passphrase()
         if not passphrase:
             raise RuntimeError("Set a recovery passphrase first (Backups → Recovery kits)")
+        os.makedirs(dk.BACKUP_TMP_DIR, exist_ok=True)
+        _ensure_space(MIN_FREE, "a recovery kit")
 
         name, stamp = dk.safe_name(kit.name), _stamp()
         root = f"kit_{name}_{stamp}"
@@ -263,12 +398,29 @@ def run_kit_backup(kit_id: int):
             os.makedirs(os.path.join(tmp_dir, sub))
 
         d = PortainerDocker(kit.connection, kit.endpoint_id)
-        summaries = _targets(d, kit)
+        summaries = _retry(run, "Listing containers", lambda: _targets(d, kit))
         if not summaries:
             raise RuntimeError(f"No containers found for {kit.project or kit.name} on {kit.endpoint_name or kit.endpoint_id}")
         inspects = [d.inspect(c["Id"]) for c in summaries]
         names = [i["Name"].lstrip("/") for i in inspects]
         run.log(f"Recovery kit for {kit.project or kit.name} on {kit.endpoint_name}: {', '.join(names)}")
+        excluded = set(json.loads(kit.exclude_mounts or "[]"))
+        problems: list[str] = []                 # anything that makes this kit incomplete → run fails
+
+        # 0. Will the copies fit? Named volume sizes are known up front (bind mounts aren't)
+        try:
+            sizes = d.volume_sizes()
+        except Exception as e:
+            sizes = None
+            run.log(f"  Couldn't size the volumes in advance ({e}) — checking space as it goes")
+        if sizes is not None:
+            wanted = {m["Name"] for i in inspects for m in i.get("Mounts") or []
+                      if m.get("Type") == "volume" and not skip_mount(m)
+                      and mount_key(i["Name"].lstrip("/"), m["Destination"]) not in excluded}
+            estimate = sum(sizes.get(v, 0) for v in wanted)
+            run.log(f"  Named volumes total about {_gib(estimate)}; "
+                    f"{_gib(shutil.disk_usage(dk.BACKUP_TMP_DIR).free)} scratch space free")
+            _ensure_space(estimate * 2 + MIN_FREE, "this kit's volumes (copied, then packed)")
 
         # 1. Definition: Portainer's own stack file when there is one, otherwise rebuilt from the containers
         stack_env: dict = {}
@@ -288,46 +440,63 @@ def run_kit_backup(kit_id: int):
         else:
             compose = reconstruct(d, inspects, stack_env)
             run.log(f"  Not a Portainer stack — reconstructed docker-compose.yml from {len(inspects)} container(s)")
+        yaml.safe_load(compose)                  # a definition that doesn't parse can't be deployed — fail now
         with open(os.path.join(tmp_dir, "stack", "docker-compose.yml"), "w") as fh:
             fh.write(compose)
 
         images = []
         for ins in inspects:
-            ref = (ins.get("Config") or {}).get("Image", "")
             info = d.image(ins.get("Image", "")) or {}
-            images.append({"container": ins["Name"].lstrip("/"), "image": ref,
+            images.append({"container": ins["Name"].lstrip("/"), "image": _image_of(ins),
                            "digest": (info.get("RepoDigests") or [None])[0]})
 
-        # 2. Databases — dumped live, before anything is stopped
-        databases = []
+        # 2. Databases — dumped live (retried once) and checked for completeness, before anything is stopped
+        databases, failed_dumps = [], []
         if kit.dump_databases:
             for ins in inspects:
-                kind = db_kind((ins.get("Config") or {}).get("Image", ""))
+                kind = db_kind(_image_of(ins))
                 cname = ins["Name"].lstrip("/")
                 if not kind:
                     continue
                 if not (ins.get("State") or {}).get("Running"):
-                    run.log(f"  {cname} isn't running — database not dumped (its data volume is still copied)", warning=True)
+                    run.log(f"  {cname} isn't running — no dump, but its files are copied while it's stopped", warning=True)
                     continue
                 ext, script = _DUMP[kind]
                 fname = f"databases/{_safe(cname)}.{kind}.{ext}"
-                code, err = d.exec_to_file(ins["Id"], ["sh", "-c", script], os.path.join(tmp_dir, fname))
-                size = os.path.getsize(os.path.join(tmp_dir, fname))
-                if code != 0 or size == 0:
-                    run.log(f"  Dump of {cname} ({kind}) failed (exit {code}): {err[:300]}", warning=True)
+                path = os.path.join(tmp_dir, fname)
+                why = None
+                for attempt in (1, 2):
+                    try:
+                        code, err = d.exec_to_file(ins["Id"], ["sh", "-c", script], path)
+                        why = f"exit {code}: {err[:200]}" if code != 0 else dump_problem(kind, path)
+                    except Exception as e:
+                        why = str(e)
+                    if not why:
+                        break
+                    if attempt == 1:
+                        run.log(f"  Dump of {cname} failed ({why}) — retrying in {RETRY_DELAY}s")
+                        time.sleep(RETRY_DELAY)
+                if why:
+                    failed_dumps.append(cname)
+                    if os.path.exists(path):
+                        os.remove(path)
+                    run.log(f"  Dump of {cname} ({kind}) failed twice: {why}", warning=not kit.cold_copy_fallback)
                     continue
+                size = os.path.getsize(path)
                 databases.append({"container": cname, "type": kind, "file": fname, "size": size,
                                   "service": ((ins.get("Config") or {}).get("Labels") or {}).get("com.docker.compose.service")})
-                run.log(f"  Dumped {kind} in {cname}: {size:,} bytes")
+                run.log(f"  Dumped {kind} in {cname}: {size:,} bytes (complete)")
 
-        # 3. Data — every volume / bind mount, once each
-        if kit.stop_during_backup:
-            for ins in inspects:
-                if (ins.get("State") or {}).get("Running"):
-                    d.stop(ins["Id"])
-                    stopped.append(ins["Id"])
-            run.log(f"  Stopped {len(stopped)} container(s) for a consistent copy")
-        excluded = set(json.loads(kit.exclude_mounts or "[]"))
+        # 3. Data — stop first if asked to, or if a dump failed (a cold copy of a stopped database is consistent)
+        cold_reason = "requested" if kit.stop_during_backup else \
+            (f"dump failed for {', '.join(failed_dumps)}" if failed_dumps and kit.cold_copy_fallback else None)
+        if cold_reason:
+            running = [i for i in inspects if (i.get("State") or {}).get("Running")]
+            # Apps before their databases, so nothing writes to a database that's going away
+            for ins in sorted(running, key=lambda i: db_kind(_image_of(i)) is not None):
+                _retry(run, f"Stopping {ins['Name'].lstrip('/')}", lambda: d.stop(ins["Id"]))
+                stopped.append(ins["Id"])
+            run.log(f"  Stopped {len(stopped)} container(s) for a consistent cold copy ({cold_reason})")
         data, seen = [], {}
         for ins in inspects:
             cname = ins["Name"].lstrip("/")
@@ -353,61 +522,101 @@ def run_kit_backup(kit_id: int):
                     data.append(entry)
                     continue
                 fname = f"data/{_safe(cname)}__{_safe(m['Destination'])}.tar"
-                size = d.archive_to_file(ins["Id"], m["Destination"], os.path.join(tmp_dir, fname))
+                path = os.path.join(tmp_dir, fname)
+                why = None
+                for attempt in (1, 2):
+                    _ensure_space(MIN_FREE // 2, f"copying {key}")
+                    try:
+                        size = d.archive_to_file(ins["Id"], m["Destination"], path)
+                        why = tar_problem(path)
+                    except Exception as e:
+                        why = str(e)
+                    if not why:
+                        break
+                    if attempt == 1:
+                        run.log(f"  Copy of {key} failed ({why}) — retrying in {RETRY_DELAY}s")
+                        time.sleep(RETRY_DELAY)
+                if why:
+                    problems.append(f"{key}: {why}")
+                    entry["failed"] = why
+                    data.append(entry)
+                    if os.path.exists(path):
+                        os.remove(path)
+                    run.log(f"  Copy of {key} failed twice: {why}", warning=True)
+                    continue
                 entry.update(archive=fname, size=size)
                 seen[ident] = fname
                 data.append(entry)
-                run.log(f"  Copied {key} ({m.get('Name') or m.get('Source')}): {size:,} bytes")
-        for cid in stopped:
-            d.start(cid)
+                run.log(f"  Copied {key} ({m.get('Name') or m.get('Source')}): {size:,} bytes (verified)")
+
         if stopped:
-            run.log(f"  Started {len(stopped)} container(s) again")
-        stopped = []
+            # Databases first on the way back up
+            order = sorted(stopped, key=lambda cid: db_kind(_image_of(next(i for i in inspects if i["Id"] == cid))) is None)
+            failed = _start_verified(d, run, order)
+            stopped = []
+            if failed:
+                run.log(f"  NOT back up after the cold copy: {', '.join(failed)}", warning=True)
+                _service_down_alert(kit, failed)
+            else:
+                run.log("  All containers running (and healthy, where they have a health check) again")
 
         # 4. Secrets (passphrase-encrypted) — stack variables plus each container's full settings
         secrets = {"stack_env": stack_env,
                    "containers": {i["Name"].lstrip("/"): {"env": (i.get("Config") or {}).get("Env") or []} for i in inspects}}
+        sealed = rc.seal(secrets, passphrase)
+        rc.unseal(sealed, passphrase)            # prove it opens before relying on it
         with open(os.path.join(tmp_dir, "secrets.enc"), "w") as fh:
-            fh.write(rc.seal(secrets, passphrase))
+            fh.write(sealed)
         with open(os.path.join(tmp_dir, "decrypt-secrets.py"), "w") as fh:
             fh.write(rc.DECRYPT_SCRIPT)
 
         manifest = {"version": 1, "kind": "recovery-kit", "name": kit.name, "project": kit.project,
                     "source": {"connection": kit.connection, "endpoint_id": kit.endpoint_id, "endpoint": kit.endpoint_name},
                     "backed_up_at": datetime.utcnow().isoformat(), "portainer_stack": bool(pstack), "git": git,
+                    "consistency": "cold" if cold_reason else "live", "cold_reason": cold_reason,
                     "containers": names, "images": images, "data": data, "databases": databases,
+                    "failed_dumps": failed_dumps, "problems": problems,
                     "networks": sorted({n for i in inspects for n in ((i.get("NetworkSettings") or {}).get("Networks") or {})})}
         with open(os.path.join(tmp_dir, "manifest.json"), "w") as fh:
             json.dump(manifest, fh, indent=2)
         with open(os.path.join(tmp_dir, "RESTORE.md"), "w") as fh:
             fh.write(restore_doc(manifest))
 
+        # 5. Pack, check the archive reads back cleanly, upload and confirm what landed
+        _ensure_space(MIN_FREE // 2, "packing the kit")
         archive = os.path.join(dk.BACKUP_TMP_DIR, f"{root}.tar.gz")
         with tarfile.open(archive, "w:gz") as tar:
             tar.add(tmp_dir, arcname=root)
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        tmp_dir = None
+        why = tar_problem(archive)
+        if why:
+            raise RuntimeError(f"The packed kit doesn't read back cleanly: {why}")
         size = os.path.getsize(archive)
         run.log(f"Uploading {size:,} bytes…")
-        ok, msg = st.upload(dest, archive, kit_dir(kit))
-        if not ok:
-            raise RuntimeError(f"Upload failed: {msg}")
-        if kit.retention_days > 0:
+        _verified_upload(run, dest, archive, kit_dir(kit))
+        if kit.retention_days > 0 and not problems:
+            # Old kits are only pruned after a complete, verified one is safely stored
             err = st.apply_retention(dest, kit_dir(kit), kit.retention_days, [f"kit_{name}"])
             if err:
                 run.log(f"Retention failed — {err}", warning=True)
-        status = run.finish(size=size, archive=f"{st.remote_name(dest)}:{kit_dir(kit)}/{os.path.basename(archive)}")
+        where = f"{st.remote_name(dest)}:{kit_dir(kit)}/{os.path.basename(archive)}"
+        if problems:
+            status = run.finish(error=f"Kit uploaded but incomplete — {'; '.join(problems)}", size=size, archive=where)
+        else:
+            status = run.finish(size=size, archive=where)
         _record_result(RecoveryKit, kit_id, status)
-        _alert_result(run, "recovery kit", kit.name, status)
+        _alert_result(run, "recovery kit", kit.name, status, "; ".join(problems) or None)
     except Exception as e:
         if run:
             _record_result(RecoveryKit, kit_id, run.finish(error=str(e)))
-            _alert_result(run, "recovery kit", run_name(kit_id), "failed", str(e))
+            _alert_result(run, "recovery kit", kit.name if kit else f"kit {kit_id}", "failed", str(e))
         print(f"Recovery kit {kit_id} failed: {e}")
     finally:
-        for cid in stopped:                      # never leave a service stopped because a copy failed
-            try:
-                d.start(cid)
-            except Exception:
-                pass
+        if stopped and d:                        # never leave a service stopped because something failed
+            failed = _start_verified(d, run, stopped) if run else []
+            if failed and kit:
+                _service_down_alert(kit, failed)
         if d:
             d.http.close()
         if tmp_dir:
@@ -422,6 +631,103 @@ def run_name(kit_id: int) -> str:
     return kit.name if kit else f"kit {kit_id}"
 
 
+# ── Verification: download the newest kit and check it end to end ──────────────
+
+def _record_verify(kit_id: int, status: str, message: str):
+    with Session(engine) as s:
+        kit = s.get(RecoveryKit, kit_id)
+        if kit:
+            kit.last_verified_at = datetime.utcnow()
+            kit.last_verify_status = status
+            kit.last_verify_message = message[:1000]
+            s.add(kit)
+            s.commit()
+
+
+def run_kit_verify(kit_id: int):
+    """Prove the newest kit is restorable without touching any host: it downloads, unpacks, every copy and
+    dump reads back complete, the compose file parses, and the current passphrase opens its secrets."""
+    if not _claim("kit", kit_id):
+        return
+    run: Optional[_Run] = None
+    kit = None
+    tmp_dir = None
+    try:
+        kit, dest = _load(kit_id)
+        if not kit:
+            return
+        run = _Run("kit", kit.id, kit.name, "verify")
+        if not dest:
+            raise RuntimeError("Destination no longer exists")
+        archives = list_kit_archives(kit, dest)
+        if not archives:
+            raise RuntimeError("No kits uploaded yet")
+        newest = archives[0]
+        _ensure_space(int(newest["size"]) * 3 + MIN_FREE // 2, "downloading and unpacking the kit")
+        tmp_dir = os.path.join(dk.BACKUP_TMP_DIR, f"kit_verify_{kit_id}_{_stamp()}")
+        os.makedirs(os.path.join(tmp_dir, "dl"))
+        local = os.path.join(tmp_dir, "dl", newest["name"])
+        run.log(f"Checking {newest['name']} ({int(newest['size']):,} bytes)")
+        ok, msg = st.download(dest, f"{kit_dir(kit)}/{newest['name']}", local)
+        if not ok:
+            raise RuntimeError(f"Download failed: {msg}")
+        why = tar_problem(local)
+        if why:
+            raise RuntimeError(f"Archive damaged: {why}")
+        root = _extract(local, os.path.join(tmp_dir, "kit"))
+        os.remove(local)
+        manifest = json.load(open(os.path.join(root, "manifest.json")))
+        issues = list(manifest.get("problems") or [])
+
+        try:
+            yaml.safe_load(open(os.path.join(root, "stack", "docker-compose.yml")))
+        except Exception as e:
+            issues.append(f"docker-compose.yml doesn't parse: {e}")
+        try:
+            rc.unseal(open(os.path.join(root, "secrets.enc")).read(), rc.passphrase() or "")
+            run.log("  Secrets open with the current recovery passphrase")
+        except Exception as e:
+            issues.append(f"secrets: {e} (kits made before a passphrase change need the old one)")
+        for e in manifest.get("data") or []:
+            if e.get("excluded") or not e.get("archive"):
+                continue
+            path = os.path.join(root, e["archive"])
+            why = "missing" if not os.path.exists(path) else tar_problem(path)
+            if not why and e.get("size") is not None and os.path.getsize(path) != e["size"]:
+                why = f"size {os.path.getsize(path):,} ≠ {e['size']:,} recorded"
+            if why:
+                issues.append(f"{e['container']}:{e['destination']}: {why}")
+        for db in manifest.get("databases") or []:
+            why = dump_problem(db["type"], os.path.join(root, db["file"]))
+            if why:
+                issues.append(f"dump of {db['container']}: {why}")
+        copies = sum(1 for e in manifest.get("data") or [] if e.get("size") is not None)
+        run.log(f"  Checked {copies} data cop{'y' if copies == 1 else 'ies'} and {len(manifest.get('databases') or [])} dump(s)"
+                f" — {manifest.get('consistency', 'live')} copy from {manifest.get('backed_up_at', '?')[:16]}")
+        if issues:
+            raise RuntimeError("; ".join(issues))
+        run.finish()
+        _record_verify(kit_id, "success", f"{newest['name']} checked end to end")
+    except Exception as e:
+        if run:
+            run.finish(error=str(e))
+            _alert_result(run, "recovery kit verification", kit.name if kit else f"kit {kit_id}", "failed", str(e))
+        _record_verify(kit_id, "failed", str(e))
+        print(f"Recovery kit verify {kit_id} failed: {e}")
+    finally:
+        if tmp_dir:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        _release("kit", kit_id)
+
+
+def verify_all():
+    """Weekly: verify every enabled kit's newest archive, one after another."""
+    with Session(engine) as s:
+        ids = [k.id for k in s.exec(select(RecoveryKit).where(RecoveryKit.enabled == True)).all()]  # noqa: E712
+    for kit_id in ids:
+        run_kit_verify(kit_id)
+
+
 # ── RESTORE.md ─────────────────────────────────────────────────────────────────
 
 def restore_doc(m: dict) -> str:
@@ -431,6 +737,10 @@ def restore_doc(m: dict) -> str:
         "",
         f"Recovery kit made by BaumLab on {m['backed_up_at'][:16].replace('T', ' ')} UTC from "
         f"**{m['source'].get('endpoint') or m['source']['endpoint_id']}** (Portainer connection *{m['source']['connection']}*).",
+        "",
+        ("Files were copied **cold** (service stopped: " + m["cold_reason"] + "), so they are consistent on their own."
+         if m.get("consistency") == "cold" else
+         "Files were copied **live**; databases are covered by the dumps in `databases/`."),
         "",
         "## Easiest: restore with BaumLab",
         "",
@@ -460,6 +770,9 @@ def restore_doc(m: dict) -> str:
         if e.get("excluded"):
             lines.append(f"- `{e['container']}:{e['destination']}` ← **not backed up** (excluded) — `{where}`")
             continue
+        if not e.get("archive"):
+            lines.append(f"- `{e['container']}:{e['destination']}` ← **copy failed**: {e.get('failed', 'unknown error')} — `{where}`")
+            continue
         top = os.path.basename(e["destination"].rstrip("/")) or "root"
         if e["type"] == "volume":
             lines.append(f"- volume `{where}` (mounted at `{e['destination']}` in {e['container']}):")
@@ -469,6 +782,8 @@ def restore_doc(m: dict) -> str:
             lines.append(f"- host path `{where}` (mounted at `{e['destination']}` in {e['container']}):")
             lines.append(f"  `mkdir -p /tmp/r && tar -xf {e['archive']} -C /tmp/r && sudo cp -a /tmp/r/{top}/. {where}/`"
                          f"  (for a single file: copy `/tmp/r/{top}` to `{where}`)")
+    if m.get("problems"):
+        lines += ["", "> **This kit is incomplete:** " + "; ".join(m["problems"])]
     lines += ["", "### 3. Deploy", "",
               f"Portainer → Stacks → Add stack named **{project}** on the target host, paste `stack/docker-compose.yml`, "
               "and load `stack.env` under *Environment variables → Advanced mode*. Start it."]

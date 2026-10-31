@@ -3,7 +3,7 @@ import { API, CRON_PRESETS, Field, Modal, StatusBadge, ago, apiJson, fmtBytes, f
 
 const blankKit = {
   name: '', connection: '', endpoint_id: '', endpoint_name: '', project: null, containers: [], exclude_mounts: [],
-  dump_databases: true, stop_during_backup: false, destination_id: '', schedule_cron: '30 3 * * *',
+  dump_databases: true, stop_during_backup: false, cold_copy_fallback: true, destination_id: '', schedule_cron: '30 3 * * *',
   retention_days: 30, enabled: true, service_ids: [],
 }
 
@@ -194,6 +194,12 @@ function KitForm({ api, initial, destinations, services, onSaved, onCancel, noti
             <input type="checkbox" checked={form.stop_during_backup} onChange={e => set({ stop_during_backup: e.target.checked })} />
             <span>Stop the service while its files are copied <span style={{ color: 'var(--text-muted)' }}>(brief downtime; databases are dumped first either way)</span></span>
           </label>
+          {!form.stop_during_backup && (
+            <label style={{ display: 'flex', gap: 6, fontSize: 13, marginBottom: 8 }}>
+              <input type="checkbox" checked={form.cold_copy_fallback} onChange={e => set({ cold_copy_fallback: e.target.checked })} />
+              <span>If a database dump fails, stop the service and copy its files cold instead <span style={{ color: 'var(--text-muted)' }}>(started again and checked afterwards)</span></span>
+            </label>
+          )}
         </div>
 
         <div>
@@ -367,6 +373,14 @@ export default function Kits({ api, destinations, services, notify, openRun }) {
     } catch (e) { notify({ ok: false, text: e.message }) }
   }
 
+  async function verify(k) {
+    try {
+      await apiJson(api, `${API}/kits/${k.id}/verify`, { method: 'POST' })
+      notify({ ok: true, text: `Verifying the newest kit of ${k.name} — result in History` })
+      setTimeout(load, 1500)
+    } catch (e) { notify({ ok: false, text: e.message }) }
+  }
+
   async function remove(k) {
     if (!confirm(`Delete recovery kit ${k.name}? Kits already uploaded are kept.`)) return
     await apiJson(api, `${API}/kits/${k.id}`, { method: 'DELETE' }).catch(e => notify({ ok: false, text: e.message }))
@@ -391,7 +405,7 @@ export default function Kits({ api, destinations, services, notify, openRun }) {
       )}
       {kits.length > 0 && (
         <table>
-          <thead><tr><th>Status</th><th>Service</th><th>Host</th><th>Schedule</th><th>Last success</th><th></th></tr></thead>
+          <thead><tr><th>Status</th><th>Service</th><th>Host</th><th>Schedule</th><th>Last success</th><th>Verified</th><th></th></tr></thead>
           <tbody>
             {kits.map(k => (
               <tr key={k.id}>
@@ -406,10 +420,17 @@ export default function Kits({ api, destinations, services, notify, openRun }) {
                 <td style={{ fontSize: 12 }}>{k.endpoint_name || k.endpoint_id}<div style={{ color: 'var(--text-muted)' }}>{k.connection}</div></td>
                 <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{k.schedule_cron || 'manual'}</td>
                 <td style={{ fontSize: 12 }} title={fullDate(k.last_success_at)}>{ago(k.last_success_at)}</td>
+                <td style={{ fontSize: 12 }} title={k.last_verify_message || 'Not verified yet — runs every Sunday, or press Verify'}>
+                  {k.last_verify_status
+                    ? <span className={`badge badge-${k.last_verify_status === 'success' ? 'green' : 'red'}`}>{k.last_verify_status === 'success' ? '✓' : '✗'} {ago(k.last_verified_at)}</span>
+                    : <span style={{ color: 'var(--text-muted)' }}>never</span>}
+                </td>
                 <td>
                   <div style={{ display: 'flex', gap: 4 }}>
                     <button className="secondary" disabled={k.running || !passphrase?.set} onClick={() => runNow(k)}>▶ Back up</button>
                     <button className="secondary" onClick={() => setBrowsing(k)}>Kits</button>
+                    <button className="secondary" disabled={k.running || !k.last_success_at} onClick={() => verify(k)}
+                      title="Download the newest kit and check every copy, dump and the passphrase">Verify</button>
                     <button className="secondary" onClick={() => openRun({ kind: 'kit', id: k.id })}>History</button>
                     <button className="secondary" onClick={() => setEditing(k)}>✎</button>
                     <button className="secondary" style={{ color: 'var(--red)' }} onClick={() => remove(k)}>✕</button>

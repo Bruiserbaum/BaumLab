@@ -100,6 +100,7 @@ class RecoveryKit(SQLModel, table=True):
     exclude_mounts: str = "[]"                  # JSON list of "container:/path" mounts to skip (media libraries…)
     dump_databases: bool = True                 # auto-detected Postgres / MySQL / MariaDB / Mongo containers
     stop_during_backup: bool = False            # stop the containers while their files are copied
+    cold_copy_fallback: bool = True             # a database dump fails → stop the service and copy its files cold
     destination_id: int = Field(foreign_key="backupdestination.id")
     schedule_cron: Optional[str] = "30 3 * * *"
     retention_days: int = 30
@@ -109,3 +110,6 @@ class RecoveryKit(SQLModel, table=True):
     last_run_at: Optional[datetime] = None
     last_run_status: Optional[str] = None
     last_success_at: Optional[datetime] = None
+    last_verified_at: Optional[datetime] = None  # newest kit downloaded and checked end to end
+    last_verify_status: Optional[str] = None     # success | failed
+    last_verify_message: Optional[str] = None

@@ -90,6 +90,7 @@ class KitIn(BaseModel):
     exclude_mounts: list[str] = []
     dump_databases: bool = True
     stop_during_backup: bool = False
+    cold_copy_fallback: bool = True
     destination_id: int
     schedule_cron: Optional[str] = "30 3 * * *"
     retention_days: int = 30
@@ -102,7 +103,9 @@ def _kit_dict(k: RecoveryKit) -> dict:
         "id": k.id, "name": k.name, "connection": k.connection, "endpoint_id": k.endpoint_id,
         "endpoint_name": k.endpoint_name, "project": k.project, "containers": json.loads(k.containers or "[]"),
         "exclude_mounts": json.loads(k.exclude_mounts or "[]"), "dump_databases": k.dump_databases,
-        "stop_during_backup": k.stop_during_backup, "destination_id": k.destination_id,
+        "stop_during_backup": k.stop_during_backup, "cold_copy_fallback": k.cold_copy_fallback,
+        "last_verified_at": k.last_verified_at, "last_verify_status": k.last_verify_status,
+        "last_verify_message": k.last_verify_message, "destination_id": k.destination_id,
         "schedule_cron": k.schedule_cron, "retention_days": k.retention_days, "enabled": k.enabled,
         "service_ids": json.loads(k.service_ids or "[]"), "last_run_at": k.last_run_at,
         "last_run_status": k.last_run_status, "last_success_at": k.last_success_at,
@@ -126,6 +129,7 @@ def _apply(k: RecoveryKit, data: KitIn, session: Session):
     k.containers = json.dumps([] if data.project else data.containers)
     k.exclude_mounts, k.dump_databases = json.dumps(data.exclude_mounts), data.dump_databases
     k.stop_during_backup, k.destination_id = data.stop_during_backup, data.destination_id
+    k.cold_copy_fallback = data.cold_copy_fallback
     k.schedule_cron, k.retention_days, k.enabled = data.schedule_cron or None, data.retention_days, data.enabled
     k.service_ids = json.dumps(data.service_ids)
 
@@ -175,6 +179,16 @@ def run_kit(kit_id: int, session: Session = Depends(get_session)):
     if not recovery_crypto.status()["set"]:
         raise HTTPException(status_code=422, detail="Set a recovery passphrase first")
     backup_schedule.run_now(recovery_kits.run_kit_backup, kit_id)
+    return {"status": "started"}
+
+
+@router.post("/kits/{kit_id}/verify")
+def verify_kit(kit_id: int, session: Session = Depends(get_session)):
+    """Download the newest kit and check it end to end (nothing on any host is touched)."""
+    _get(session, RecoveryKit, kit_id, "Recovery kit")
+    if backup_engine.is_running("kit", kit_id):
+        raise HTTPException(status_code=409, detail="This kit is busy")
+    backup_schedule.run_now(recovery_kits.run_kit_verify, kit_id)
     return {"status": "started"}
 
 
