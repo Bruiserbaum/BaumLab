@@ -21,7 +21,7 @@ from ..models.portainer import ContainerSnapshot
 from ..models.service import Service
 from ..models.terminal import SshHost, TerminalSession
 from ..models.vault import VaultEntry
-from . import alerts, icons
+from . import alerts, backup_storage, icons
 from .config_service import read_config
 
 _last: dict = {"ran_at": None, "findings": [], "startup": None}
@@ -166,6 +166,11 @@ def run_checks() -> list[dict]:
             if t.destination_id not in destinations:
                 issue(f"backup-dest:{kind}:{t.id}", "Backups", "error",
                       f"Backup {kind} {t.name} points at a destination that no longer exists", "/backups?tab=jobs")
+        for dest in s.exec(select(BackupDestination)).all():
+            cred = backup_storage.dest_config(dest).get("credential_id")
+            if cred and not s.get(VaultEntry, int(cred)):
+                issue(f"backup-dest-cred:{dest.id}", "Backups", "error",
+                      f"Destination {dest.name} uses a vault entry that no longer exists — its backups will fail", "/backups?tab=destinations")
         for rec in s.exec(select(BackupRecord)).all():
             if rec.service_id not in services:
                 s.delete(rec)
@@ -209,6 +214,11 @@ def _check_runtime(has_backups: bool) -> list[dict]:
                     backup_schedule.schedule_kit(kit)
                     out.append({"key": None, "check": "Backups", "severity": "fixed",
                                 "text": f"Re-registered the schedule for recovery kit {kit.name}", "link": "/backups?tab=kits"})
+        vb = backup_schedule.vault_backup.target()
+        if vb.enabled and vb.schedule_cron and not backup_schedule.next_run("vault", 0):
+            backup_schedule.schedule_vault()
+            out.append({"key": None, "check": "Backups", "severity": "fixed",
+                        "text": "Re-registered the vault backup schedule", "link": "/backups?tab=kits"})
     except Exception as e:
         out.append({"key": "scheduler", "check": "Backups", "severity": "error",
                     "text": f"Couldn't verify backup schedules: {e}", "link": "/backups"})

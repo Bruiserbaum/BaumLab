@@ -1,9 +1,11 @@
 """Recovery kits (Backups → Recovery kits) and the recovery passphrase that encrypts their secrets."""
 import json
 import re
+from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
@@ -12,7 +14,7 @@ from ..models.backup import BackupDestination, RecoveryKit
 from ..models.portainer import ContainerSnapshot
 from ..models.user import User
 from ..models.vault import VaultAudit
-from ..services import backup_engine, backup_schedule, recovery_crypto, recovery_kits
+from ..services import backup_engine, backup_schedule, recovery_crypto, recovery_kits, vault_backup
 from ..services.auth import require_admin
 from ..services.config_service import read_config
 
@@ -227,3 +229,100 @@ def restore_kit(kit_id: int, data: KitRestoreIn, session: Session = Depends(get_
                             data.stack_name, data.restore_data, data.deploy, data.import_databases,
                             data.replace_existing, data.passphrase)
     return {"status": "started"}
+
+
+# ── Vault backup ───────────────────────────────────────────────────────────────
+
+class VaultBackupIn(BaseModel):
+    destination_id: Optional[int] = None
+    schedule_cron: Optional[str] = "15 3 * * *"
+    retention_days: int = 90
+    enabled: bool = False
+
+
+class VaultRestoreIn(BaseModel):
+    filename: str
+    passphrase: Optional[str] = None
+
+
+def _vault_status() -> dict:
+    t = vault_backup.target()
+    return {**vault_backup.settings(), "last_run_at": t.last_run_at, "last_run_status": t.last_run_status,
+            "last_success_at": t.last_success_at, "next_run": backup_schedule.next_run("vault", 0),
+            "running": backup_engine.is_running("vault", 0),
+            "freshness": backup_schedule.freshness(t.enabled, t.schedule_cron, t.last_run_status, t.last_success_at)}
+
+
+@router.get("/vault-backup")
+def vault_backup_status():
+    return _vault_status()
+
+
+@router.put("/vault-backup")
+def save_vault_backup(data: VaultBackupIn, session: Session = Depends(get_session)):
+    if data.destination_id is not None:
+        _get(session, BackupDestination, data.destination_id, "Destination")
+    if data.enabled and data.destination_id is None:
+        raise HTTPException(status_code=422, detail="Choose a destination")
+    if data.schedule_cron:
+        try:
+            backup_schedule.parse_cron(data.schedule_cron)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+    vault_backup.save_settings({**data.model_dump(), "schedule_cron": data.schedule_cron or None})
+    backup_schedule.schedule_vault()
+    return _vault_status()
+
+
+@router.post("/vault-backup/run")
+def run_vault_backup():
+    if backup_engine.is_running("vault", 0):
+        raise HTTPException(status_code=409, detail="The vault backup is already running")
+    if not recovery_crypto.status()["set"]:
+        raise HTTPException(status_code=422, detail="Set a recovery passphrase first")
+    if not vault_backup.settings()["destination_id"]:
+        raise HTTPException(status_code=422, detail="Choose a destination and save first")
+    backup_schedule.run_now(vault_backup.run_vault_backup)
+    return {"status": "started"}
+
+
+@router.post("/vault-backup/download")
+def download_vault_backup(user: User = Depends(require_admin)):
+    """The whole vault sealed with the recovery passphrase, as a file — POST so it's never cached."""
+    try:
+        text, _count = vault_backup.sealed_export(user.username)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    filename = f"baumlab-vault-{datetime.utcnow():%Y%m%d-%H%M}.enc"
+    return PlainTextResponse(text, media_type="application/json",
+                             headers={"Content-Disposition": f'attachment; filename="{filename}"', "Cache-Control": "no-store"})
+
+
+@router.get("/vault-backup/archives")
+def vault_backup_archives():
+    try:
+        return vault_backup.list_archives()
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.post("/vault-backup/restore")
+def restore_vault_backup(data: VaultRestoreIn, user: User = Depends(require_admin)):
+    if not re.match(r"^vault_[^/\\]+\.tar\.gz$", data.filename):
+        raise HTTPException(status_code=422, detail="Invalid archive name")
+    try:
+        return vault_backup.restore_archive(data.filename, data.passphrase, user.username)
+    except (ValueError, RuntimeError) as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.post("/vault-backup/import")
+async def import_vault_backup(file: UploadFile = File(...), passphrase: str = Form(""), user: User = Depends(require_admin)):
+    """Restore from a downloaded .enc file (e.g. into a fresh BaumLab)."""
+    raw = await file.read()
+    if len(raw) > 20 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File too large")
+    try:
+        return vault_backup.restore_text(raw.decode("utf-8"), passphrase or None, user.username)
+    except (ValueError, UnicodeDecodeError, KeyError) as e:
+        raise HTTPException(status_code=422, detail=str(e))

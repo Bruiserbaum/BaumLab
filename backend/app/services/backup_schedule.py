@@ -11,7 +11,7 @@ from sqlmodel import Session, select
 
 from ..database import engine
 from ..models.backup import BackupJob, BackupRecord, BackupStack, RecoveryKit
-from . import alerts, backup_engine, recovery_kits
+from . import alerts, backup_engine, recovery_kits, vault_backup
 
 _scheduler = None
 MANUAL_STACK_STALE_DAYS = 30
@@ -28,6 +28,7 @@ def init(scheduler):
             schedule_stack(stack)
         for kit in s.exec(select(RecoveryKit)).all():
             schedule_kit(kit)
+    schedule_vault()
     # Every Sunday morning, download each kit's newest archive and check it end to end
     scheduler.add_job(recovery_kits.verify_all, CronTrigger.from_crontab("0 5 * * 0"), id="verify_kits",
                       replace_existing=True, misfire_grace_time=6 * 3600, coalesce=True, max_instances=1)
@@ -63,6 +64,11 @@ def schedule_stack(stack: BackupStack):
 
 def schedule_kit(kit: RecoveryKit):
     _set(f"backup_kit_{kit.id}", recovery_kits.run_kit_backup, kit.schedule_cron, kit.enabled, [kit.id])
+
+
+def schedule_vault():
+    t = vault_backup.target()
+    _set("backup_vault_0", vault_backup.run_vault_backup, t.schedule_cron, t.enabled, [])
 
 
 def unschedule(kind: str, target_id: int):
@@ -116,7 +122,8 @@ def check_stale_alerts():
     with Session(engine) as s:
         targets = [("job", j) for j in s.exec(select(BackupJob)).all()] + \
                   [("stack", x) for x in s.exec(select(BackupStack)).all()] + \
-                  [("recovery kit", k) for k in s.exec(select(RecoveryKit)).all()]
+                  [("recovery kit", k) for k in s.exec(select(RecoveryKit)).all()] + \
+                  [("vault backup", vault_backup.target())]
     for kind, t in targets:
         status = freshness(t.enabled, t.schedule_cron, t.last_run_status, t.last_success_at)
         prev = alerts.transition(f"backup:{kind.split()[-1]}:{t.id}", status)

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useApi } from '../auth'
 
 const API = '/api'
@@ -186,6 +186,8 @@ export default function VaultPage() {
       <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '-8px 0 16px' }}>
         Encrypted with {status.key_source}. Admin-only; every reveal and copy is logged. Passwords
         hide again after {HIDE_AFTER_MS / 1000}s and are never included in Git sync or PDF exports.
+        Back it up (encrypted with your recovery passphrase) under{' '}
+        <Link to="/backups?tab=kits" style={{ color: 'var(--accent)' }}>Backups → Recovery kits</Link>.
       </p>
 
       <div className="toolbar" style={{ flexWrap: 'wrap' }}>

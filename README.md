@@ -91,7 +91,8 @@ A self-hosted home lab monitoring, mapping, and security dashboard. Discover eve
   - **Weekly verification** (and a Verify button): the newest kit is downloaded and checked end to end — archive integrity, every data copy and dump, the compose file, and that the current passphrase still opens its secrets
 - **Container jobs**: archive Docker volumes and bind mounts, optional PostgreSQL / MySQL dump, optionally stop containers for a consistent copy (restarted before the upload), cron schedules and retention
 - **Stack backups** for disaster recovery: a compose project's named volumes, its environment (encrypted) and the repo it deploys from
-- **Destinations**: Backblaze B2, SMB / NAS, SFTP, local folder (via rclone; credentials stay encrypted and are only handed to rclone while it runs)
+- **Destinations**: Backblaze B2, SMB / NAS, SFTP, local folder (via rclone; credentials stay encrypted and are only handed to rclone while it runs). Passwords and keys can live in the **vault** instead: the destination links to a vault entry, the secret is read only while rclone runs, each use is audited, and an existing destination's password can be moved into the vault with one click. SFTP can use a private key stored in the vault
+- **Vault backup**: the whole vault, encrypted with the recovery passphrase, on a schedule to any destination (plus an on-demand encrypted download). Readable without BaumLab with the included `decrypt-secrets.py`; restores into BaumLab (existing entries are left alone)
 - **Restore**: pick an archive and restore volumes and/or the database. For stacks: restore volumes and view the saved `.env` to redeploy in Portainer
 - **Coverage**: every service shows whether it is protected and whether the last backup is fresh. Manual records cover backups made elsewhere (Unraid, Proxmox, NAS snapshots)
 - **Import** an existing BaumLabBackup database (destinations, jobs, stacks)

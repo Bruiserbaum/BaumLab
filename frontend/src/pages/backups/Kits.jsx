@@ -79,6 +79,142 @@ function PassphraseCard({ api, status, onChange, notify }) {
   )
 }
 
+function VaultBackupCard({ api, destinations, passphraseSet, notify, openRun }) {
+  const [status, setStatus] = useState(null)
+  const [form, setForm] = useState(null)
+  const [archives, setArchives] = useState(null)
+  const [restorePass, setRestorePass] = useState('')
+  const [busy, setBusy] = useState(false)
+  const set = patch => setForm(f => ({ ...f, ...patch }))
+
+  async function load() {
+    try {
+      const s = await apiJson(api, `${API}/vault-backup`)
+      setStatus(s)
+      setForm(f => f ?? { destination_id: s.destination_id ?? destinations[0]?.id ?? '', schedule_cron: s.schedule_cron || '',
+                          retention_days: s.retention_days, enabled: s.enabled })
+    } catch (e) { notify({ ok: false, text: e.message }) }
+  }
+  useEffect(() => { load() }, [])
+
+  async function save(e) {
+    e.preventDefault()
+    try {
+      setStatus(await apiJson(api, `${API}/vault-backup`, { method: 'PUT', body: JSON.stringify({
+        ...form, destination_id: form.destination_id === '' ? null : +form.destination_id,
+        retention_days: +form.retention_days, schedule_cron: form.schedule_cron || null }) }))
+      notify({ ok: true, text: 'Vault backup settings saved' })
+    } catch (err) { notify({ ok: false, text: err.message }) }
+  }
+
+  async function runNow() {
+    try {
+      await apiJson(api, `${API}/vault-backup/run`, { method: 'POST' })
+      notify({ ok: true, text: 'Backing up the vault — result in History' })
+      setTimeout(load, 2000)
+    } catch (e) { notify({ ok: false, text: e.message }) }
+  }
+
+  async function download() {
+    const r = await api(`${API}/vault-backup/download`, { method: 'POST' })
+    if (!r.ok) { notify({ ok: false, text: (await r.json().catch(() => ({}))).detail || `HTTP ${r.status}` }); return }
+    const name = (r.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/)?.[1] || 'baumlab-vault.enc'
+    const url = URL.createObjectURL(await r.blob())
+    Object.assign(document.createElement('a'), { href: url, download: name }).click()
+    URL.revokeObjectURL(url)
+  }
+
+  async function restore(filename) {
+    if (!confirm(`Restore vault entries from ${filename}? Entries that already exist (same title and username) are left as they are.`)) return
+    setBusy(true)
+    try {
+      const r = await apiJson(api, `${API}/vault-backup/restore`, { method: 'POST', body: JSON.stringify({ filename, passphrase: restorePass || null }) })
+      notify({ ok: true, text: `Vault restored: ${r.added} entr${r.added === 1 ? 'y' : 'ies'} added, ${r.skipped} already there` })
+    } catch (e) { notify({ ok: false, text: e.message }) } finally { setBusy(false) }
+  }
+
+  async function importFile(file) {
+    if (!file) return
+    const body = new FormData()
+    body.append('file', file)
+    body.append('passphrase', restorePass)
+    setBusy(true)
+    try {
+      const r = await apiJson(api, `${API}/vault-backup/import`, { method: 'POST', body })
+      notify({ ok: true, text: `Vault restored: ${r.added} added, ${r.skipped} already there` })
+    } catch (e) { notify({ ok: false, text: e.message }) } finally { setBusy(false) }
+  }
+
+  if (!status || !form) return null
+  return (
+    <div className="card">
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <b style={{ color: 'var(--text)', fontSize: 14 }}>Vault backup</b>
+        {status.running ? <StatusBadge status="running" /> : <StatusBadge status={status.freshness} />}
+        {status.last_success_at && <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>last good {ago(status.last_success_at)}</span>}
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
+          <button className="secondary" disabled={!passphraseSet || status.running || !status.destination_id} onClick={runNow}>▶ Back up</button>
+          <button className="secondary" disabled={!passphraseSet} onClick={download} title="Download the whole vault, encrypted with the recovery passphrase">⬇ Encrypted copy</button>
+          <button className="secondary" onClick={() => openRun({ kind: 'vault', id: 0 })}>History</button>
+        </div>
+      </div>
+      <p style={{ margin: '8px 0 12px', fontSize: 12, color: 'var(--text-muted)' }}>
+        Every vault entry, encrypted with the recovery passphrase — readable without BaumLab using the included
+        <code> decrypt-secrets.py</code>, and restorable into a fresh BaumLab.
+      </p>
+      <form onSubmit={save} style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <Field label="Destination" style={{ marginBottom: 0 }}>
+          <select value={form.destination_id ?? ''} onChange={e => set({ destination_id: e.target.value })}>
+            <option value="">— choose —</option>
+            {destinations.map(d => <option key={d.id} value={d.id}>{d.name} ({d.type})</option>)}
+          </select>
+        </Field>
+        <Field label="Schedule (cron)" style={{ marginBottom: 0 }}>
+          <input value={form.schedule_cron} style={{ width: 120, fontFamily: 'monospace' }} onChange={e => set({ schedule_cron: e.target.value })} />
+        </Field>
+        <Field label="Keep (days)" style={{ marginBottom: 0 }}>
+          <input type="number" min={0} value={form.retention_days} style={{ width: 80 }} onChange={e => set({ retention_days: e.target.value })} />
+        </Field>
+        <label style={{ display: 'flex', gap: 6, fontSize: 13, paddingBottom: 8 }}>
+          <input type="checkbox" checked={form.enabled} onChange={e => set({ enabled: e.target.checked })} /> Scheduled
+        </label>
+        <button type="submit">Save</button>
+      </form>
+      <details style={{ marginTop: 12 }} onToggle={e => {
+        if (e.target.open && archives === null && status.destination_id)
+          apiJson(api, `${API}/vault-backup/archives`).then(setArchives).catch(err => { setArchives([]); notify({ ok: false, text: err.message }) })
+      }}>
+        <summary style={{ cursor: 'pointer', fontSize: 13 }}>Restore…</summary>
+        <div style={{ marginTop: 8 }}>
+          <Field label="Passphrase" hint="only if the backup was made with an older passphrase">
+            <input type="password" value={restorePass} onChange={e => setRestorePass(e.target.value)} style={{ width: 260 }} autoComplete="off" />
+          </Field>
+          {archives?.length > 0 && (
+            <table>
+              <thead><tr><th>Backup</th><th>Size</th><th>Date</th><th></th></tr></thead>
+              <tbody>
+                {archives.slice(0, 20).map(a => (
+                  <tr key={a.name}>
+                    <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{a.name}</td>
+                    <td>{fmtBytes(a.size)}</td>
+                    <td style={{ fontSize: 12 }}>{fullDate(a.modified)}</td>
+                    <td><button className="secondary" disabled={busy} onClick={() => restore(a.name)}>Restore</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {archives?.length === 0 && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>No vault backups at the destination yet.</div>}
+          <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginTop: 8 }}>
+            …or from a downloaded <code>.enc</code> file (e.g. on a fresh BaumLab):{' '}
+            <input type="file" accept=".enc,application/json" disabled={busy} onChange={e => importFile(e.target.files[0])} />
+          </label>
+        </div>
+      </details>
+    </div>
+  )
+}
+
 function KitForm({ api, initial, destinations, services, onSaved, onCancel, notify }) {
   const editing = initial?.id != null
   const [form, setForm] = useState({ ...blankKit, destination_id: destinations[0]?.id ?? '', ...initial })
@@ -390,6 +526,7 @@ export default function Kits({ api, destinations, services, notify, openRun }) {
   return (
     <div>
       {passphrase && <PassphraseCard api={api} status={passphrase} onChange={setPassphrase} notify={notify} />}
+      <VaultBackupCard api={api} destinations={destinations} passphraseSet={!!passphrase?.set} notify={notify} openRun={openRun} />
       {editing ? (
         <KitForm api={api} initial={editing} destinations={destinations} services={services} notify={notify}
           onCancel={() => setEditing(null)}

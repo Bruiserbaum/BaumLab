@@ -82,6 +82,13 @@ def update_entry(entry_id: int, data: VaultEntryIn, user: User = Depends(require
 @router.delete("/{entry_id}", dependencies=unlocked)
 def delete_entry(entry_id: int, user: User = Depends(require_admin), session: Session = Depends(get_session)):
     entry = _get(session, entry_id)
+    from ..models.backup import BackupDestination
+    from ..services import backup_storage
+    users = [d.name for d in session.exec(select(BackupDestination)).all()
+             if backup_storage.dest_config(d).get("credential_id") == entry_id]
+    if users:
+        raise HTTPException(status_code=409, detail=f"Backup destination {', '.join(users)} uses this entry — "
+                                                    "point it at another credential first")
     _audit(session, entry, user, "delete")
     session.delete(entry)
     session.commit()

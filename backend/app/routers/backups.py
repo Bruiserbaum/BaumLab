@@ -12,9 +12,9 @@ from ..database import get_session
 from ..models.backup import BackupDestination, BackupJob, BackupRecord, BackupRun, BackupStack, RecoveryKit
 from ..models.service import Service
 from ..models.user import User
-from ..models.vault import VaultAudit
+from ..models.vault import VaultAudit, VaultEntry
 from ..services import backup_docker as dk
-from ..services import backup_engine, backup_import, backup_schedule
+from ..services import backup_engine, backup_import, backup_schedule, vault, vault_backup
 from ..services import backup_storage as st
 from ..services.auth import get_current_user, require_admin
 from ..services.config_service import encrypt
@@ -94,8 +94,13 @@ class DestinationIn(BaseModel):
 def _dest_dict(d: BackupDestination, session: Session) -> dict:
     used = len(session.exec(select(BackupJob).where(BackupJob.destination_id == d.id)).all()) + \
            len(session.exec(select(BackupStack).where(BackupStack.destination_id == d.id)).all()) + \
-           len(session.exec(select(RecoveryKit).where(RecoveryKit.destination_id == d.id)).all())
-    return {"id": d.id, "name": d.name, "type": d.type, "config": st.redact(st.dest_config(d)), "used_by": used}
+           len(session.exec(select(RecoveryKit).where(RecoveryKit.destination_id == d.id)).all()) + \
+           (1 if vault_backup.settings().get("destination_id") == d.id else 0)
+    cfg = st.dest_config(d)
+    entry = session.get(VaultEntry, int(cfg["credential_id"])) if cfg.get("credential_id") else None
+    return {"id": d.id, "name": d.name, "type": d.type, "config": st.redact(cfg), "used_by": used,
+            "credential": {"id": entry.id, "title": entry.title} if entry else None,
+            "credential_missing": bool(cfg.get("credential_id")) and entry is None}
 
 
 @router.get("/destinations", dependencies=admin)
@@ -103,9 +108,29 @@ def list_destinations(session: Session = Depends(get_session)):
     return [_dest_dict(d, session) for d in session.exec(select(BackupDestination).order_by(BackupDestination.name)).all()]
 
 
+def _clean_config(dest_type: str, config: dict, old: dict, session: Session) -> dict:
+    """Keep stored secrets when the form sends them masked/blank, and never store a secret
+    inline when the destination takes it from a vault entry."""
+    merged = dict(config)
+    cred = merged.get("credential_id")
+    if cred in ("", None):
+        merged.pop("credential_id", None)
+        for field in st.SECRET_FIELDS:                   # masked / blank secret = keep the stored one
+            if merged.get(field) in (None, "", "••••••••"):
+                merged[field] = old.get(field, "")
+    else:
+        if not session.get(VaultEntry, int(cred)):
+            raise HTTPException(status_code=422, detail="That vault entry doesn't exist")
+        merged["credential_id"] = int(cred)
+        for field in st.SECRET_FIELDS:
+            merged.pop(field, None)
+    return merged
+
+
 @router.post("/destinations", dependencies=admin)
 def create_destination(data: DestinationIn, session: Session = Depends(get_session)):
-    d = BackupDestination(name=data.name, type=data.type, config_enc=encrypt(json.dumps(data.config)))
+    config = _clean_config(data.type, data.config, {}, session)
+    d = BackupDestination(name=data.name, type=data.type, config_enc=encrypt(json.dumps(config)))
     session.add(d)
     session.commit()
     session.refresh(d)
@@ -115,12 +140,30 @@ def create_destination(data: DestinationIn, session: Session = Depends(get_sessi
 @router.put("/destinations/{dest_id}", dependencies=admin)
 def update_destination(dest_id: int, data: DestinationIn, session: Session = Depends(get_session)):
     d = _get(session, BackupDestination, dest_id, "Destination")
-    old = st.dest_config(d)
-    merged = dict(data.config)
-    for field in st.SECRET_FIELDS:                       # masked / blank secret = keep the stored one
-        if merged.get(field) in (None, "", "••••••••"):
-            merged[field] = old.get(field, "")
+    merged = _clean_config(data.type, data.config, st.dest_config(d), session)
     d.name, d.type, d.config_enc = data.name, data.type, encrypt(json.dumps(merged))
+    session.add(d)
+    session.commit()
+    return _dest_dict(d, session)
+
+
+@router.post("/destinations/{dest_id}/to-vault")
+def destination_to_vault(dest_id: int, user: User = Depends(require_admin), session: Session = Depends(get_session)):
+    """Move a destination's stored password / key into a new vault entry and link it."""
+    vault.require_unlocked()
+    d = _get(session, BackupDestination, dest_id, "Destination")
+    cfg = st.dest_config(d)
+    field = st.SECRET_BY_TYPE.get(d.type)
+    if not field or not cfg.get(field):
+        raise HTTPException(status_code=422, detail="This destination has no stored password or key to move")
+    entry = VaultEntry(title=f"Backup destination: {d.name}", username=cfg.get(st.USER_BY_TYPE[d.type]) or None,
+                       secret_enc=vault.encrypt(cfg[field]), updated_by=user.username)
+    session.add(entry)
+    session.flush()
+    session.add(VaultAudit(entry_id=entry.id, entry_title=entry.title, actor=user.username, action="create"))
+    cfg.pop(field)
+    cfg["credential_id"] = entry.id
+    d.config_enc = encrypt(json.dumps(cfg))
     session.add(d)
     session.commit()
     return _dest_dict(d, session)
@@ -130,7 +173,7 @@ def update_destination(dest_id: int, data: DestinationIn, session: Session = Dep
 def delete_destination(dest_id: int, session: Session = Depends(get_session)):
     d = _get(session, BackupDestination, dest_id, "Destination")
     if _dest_dict(d, session)["used_by"]:
-        raise HTTPException(status_code=409, detail="Destination is used by backup jobs, stacks or recovery kits")
+        raise HTTPException(status_code=409, detail="Destination is used by backup jobs, stacks, recovery kits or the vault backup")
     session.delete(d)
     session.commit()
     return {"ok": True}
