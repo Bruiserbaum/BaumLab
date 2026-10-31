@@ -29,6 +29,7 @@ export default function PortainerPage() {
   const [connections, setConnections] = useState([])
   const [form, setForm] = useState({ name: '', url: 'http://', api_key: '', enabled: true })
   const [saving, setSaving] = useState(false)
+  const [saveResult, setSaveResult] = useState(null)
 
   const intervalRef = useRef(null)
 
@@ -94,17 +95,24 @@ export default function PortainerPage() {
   async function saveConnection(e) {
     e.preventDefault()
     setSaving(true)
+    setSaveResult(null)
     try {
       const r = await api(`${API}/api/portainer/connections`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form),
       })
-      if (r.ok) {
-        setForm({ name: '', url: 'http://', api_key: '', enabled: true })
-        setShowForm(false)
-        await loadConnections()
+      const data = await r.json().catch(() => ({}))
+      if (!r.ok) {
+        setSaveResult({ ok: false, message: data.detail || `Save failed (HTTP ${r.status})` })
+        return
       }
+      // Saved either way; the test tells you whether BaumLab can actually use it
+      setSaveResult({ ok: data.test?.ok, message: `Saved ${form.name}. ${data.test?.message ?? ''}` })
+      if (data.test?.ok) setForm({ name: '', url: 'http://', api_key: '', enabled: true })
+      await Promise.all([loadConnections(), load()])
+    } catch (err) {
+      setSaveResult({ ok: false, message: err.message })
     } finally {
       setSaving(false)
     }
@@ -235,8 +243,13 @@ export default function PortainerPage() {
               <input type="checkbox" checked={form.enabled} onChange={e => setForm({ ...form, enabled: e.target.checked })} />
               Enabled
             </label>
-            <button type="submit" disabled={saving}>{saving ? 'Saving…' : 'Add / Update'}</button>
+            <button type="submit" disabled={saving}>{saving ? 'Testing…' : 'Add / Update'}</button>
           </form>
+          {saveResult && (
+            <div style={{ fontSize: 12, marginTop: 8, color: saveResult.ok ? 'var(--green)' : 'var(--red)' }}>
+              {saveResult.ok ? '✓' : '✗'} {saveResult.message}
+            </div>
+          )}
         </div>
       )}
 
