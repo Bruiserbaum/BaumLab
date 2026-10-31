@@ -52,6 +52,8 @@ function TerminalTab({ api, tab, active, onStatus, onHostKeyReset }) {
     const ws = new WebSocket(`${proto}://${location.host}${API}/ws/${tab.hostId}?ticket=${encodeURIComponent(ticket)}&cols=${term.cols}&rows=${term.rows}`)
     ws.binaryType = 'arraybuffer'
     wsRef.current = ws
+    let opened = false
+    ws.onopen = () => { opened = true }
     ws.onmessage = ev => {
       if (typeof ev.data !== 'string') { term.write(new Uint8Array(ev.data)); return }
       const msg = JSON.parse(ev.data)
@@ -67,6 +69,14 @@ function TerminalTab({ api, tab, active, onStatus, onHostKeyReset }) {
       }
     }
     ws.onclose = () => setState(s => {
+      if (!opened) {
+        // The upgrade never completed — something between the browser and BaumLab dropped it
+        const why = 'The browser could not open a WebSocket to BaumLab. If it sits behind a reverse proxy, that proxy ' +
+          'must pass WebSocket upgrades (Nginx Proxy Manager with a custom "location /" block: see README → Terminal).'
+        term.writeln(`\r\n\x1b[31m${why}\x1b[0m`)
+        onStatus(tab.id, 'closed')
+        return { ...s, status: 'error', message: 'WebSocket blocked' }
+      }
       if (s.status === 'connecting' || s.status === 'connected') {
         term.writeln('\r\n\x1b[90m[connection lost]\x1b[0m')
         onStatus(tab.id, 'closed')
