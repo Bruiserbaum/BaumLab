@@ -169,7 +169,7 @@ def apply_retention(dest: BackupDestination, sub_dir: str, days: int, name_prefi
 
 # ── Backblaze B2 key check / bucket list (straight to the B2 API, for clear answers) ──
 
-B2_AUTH_URL = "https://api.backblazeb2.com/b2api/v3/b2_authorize_account"
+B2_AUTH_URL = "https://api.backblazeb2.com/b2api/v2/b2_authorize_account"
 B2_NEEDS = {"listFiles": "list archives", "readFiles": "restore", "writeFiles": "upload backups",
             "deleteFiles": "remove old archives (retention)"}
 B2_REJECTED = ("Backblaze rejected this Key ID / Application key. Copy both again from Backblaze → Application Keys "
@@ -179,12 +179,22 @@ B2_REJECTED = ("Backblaze rejected this Key ID / Application key. Copy both agai
 
 def _b2_message(r) -> str:
     try:
-        return r.json().get("message") or r.text[:200]
+        body = r.json()
+        return body.get("message") or body.get("code") or r.text[:200]
     except ValueError:
         return r.text[:200]
 
 
-def b2_check(key_id: str, app_key: str) -> dict:
+def _b2_restricted(allowed: dict) -> list[dict]:
+    """Buckets a key is restricted to, as [{id, name}] — v2 names one bucket, v3 lists them."""
+    found = [{"id": b.get("id") or b.get("bucketId"), "name": b.get("name") or b.get("bucketName")}
+             for b in allowed.get("buckets") or [] if isinstance(b, dict)]
+    if allowed.get("bucketId") or allowed.get("bucketName"):
+        found.append({"id": allowed.get("bucketId"), "name": allowed.get("bucketName")})
+    return [b for b in found if b["id"] or b["name"]]
+
+
+def b2_check(key_id: str, app_key: str, bucket_hint: str = "") -> dict:
     """{buckets, missing: [(capability, what it's for)], prefix} for a B2 application key.
     Raises ValueError when Backblaze rejects the key, RuntimeError when it can't be checked."""
     import httpx
@@ -200,24 +210,45 @@ def b2_check(key_id: str, app_key: str) -> dict:
     if r.status_code != 200:
         raise RuntimeError(f"Backblaze answered {r.status_code}: {_b2_message(r)}")
     auth = r.json()
+    # v2 puts these at the top level, v3 under apiInfo.storageApi — accept either
     storage = (auth.get("apiInfo") or {}).get("storageApi") or {}
-    allowed = storage.get("allowed") or {}
+    api_url = auth.get("apiUrl") or storage.get("apiUrl")
+    allowed = auth.get("allowed") or storage.get("allowed") or {}
     caps = allowed.get("capabilities") or []
-    if not storage.get("apiUrl") or not auth.get("accountId"):
+    if not api_url or not auth.get("accountId"):
         raise RuntimeError("Backblaze answered in an unexpected format")
-    if allowed.get("buckets"):
-        # Key restricted to particular buckets — those are the only ones it can use
-        buckets = sorted(b["name"] for b in allowed["buckets"] if b.get("name"))
-    else:
+    if not caps:
+        print(f"B2 key check: no capability list in the answer (allowed keys: {sorted(allowed)})")
+
+    def list_buckets(**only) -> Optional[list[str]]:
         try:
-            r = httpx.post(f"{storage['apiUrl']}/b2api/v3/b2_list_buckets", json={"accountId": auth["accountId"]},
+            r = httpx.post(f"{api_url}/b2api/v2/b2_list_buckets", json={"accountId": auth["accountId"], **only},
                            headers={"Authorization": auth["authorizationToken"]}, timeout=20)
         except httpx.HTTPError as e:
             raise RuntimeError(f"Couldn't list buckets: {e}")
         if r.status_code != 200:
-            hint = " — give the key the listBuckets permission, or type the bucket name" if "listBuckets" not in caps else ""
-            raise RuntimeError(f"Couldn't list buckets: {_b2_message(r)}{hint}")
-        buckets = sorted(b["bucketName"] for b in r.json().get("buckets", []))
+            list_buckets.error = _b2_message(r)
+            return None
+        return [b["bucketName"] for b in r.json().get("buckets", []) if b.get("bucketName")]
+    list_buckets.error = ""
+
+    restricted = _b2_restricted(allowed)
+    if restricted:
+        # A key limited to certain buckets may only ask about those, by id
+        buckets = [b["name"] for b in restricted if b["name"]]
+        for b in restricted:
+            if not b["name"] and b["id"]:
+                buckets += list_buckets(bucketId=b["id"]) or []
+    else:
+        buckets = list_buckets()
+        if buckets is None and bucket_hint:
+            # Can't see every bucket (often a single-bucket key) — ask about the one typed in
+            buckets = list_buckets(bucketName=bucket_hint.strip())
+            if buckets == []:
+                raise ValueError(f"This key can't reach a bucket called “{bucket_hint.strip()}” — check the name (it's case-sensitive)")
+        if buckets is None:
+            raise RuntimeError(f"Couldn't list buckets ({list_buckets.error}). If this key is limited to one bucket, "
+                               "type the bucket name and click List buckets again")
     # No capability list at all means an answer shaped differently than expected — don't cry wolf
     missing = [[c, why] for c, why in B2_NEEDS.items() if c not in caps] if caps else []
     return {"buckets": buckets, "missing": missing,
@@ -227,13 +258,13 @@ def b2_check(key_id: str, app_key: str) -> dict:
 def _b2_problem(dest: BackupDestination) -> Optional[str]:
     """Plain-language reason a B2 destination can't work, or None. Warnings come back prefixed '!'."""
     cfg = resolved_config(dest)
+    bucket = (cfg.get("bucket") or (cfg.get("path") or "").strip("/").split("/")[0]).strip()
     try:
-        info = b2_check(cfg.get("account_id", ""), cfg.get("application_key", ""))
+        info = b2_check(cfg.get("account_id", ""), cfg.get("application_key", ""), bucket)
     except ValueError as e:
         return str(e)
     except RuntimeError:
         return None                       # couldn't check — let rclone have a go and report its own error
-    bucket = (cfg.get("bucket") or (cfg.get("path") or "").strip("/").split("/")[0]).strip()
     if bucket and info["buckets"] and bucket not in info["buckets"]:
         return f"This key can't see a bucket called “{bucket}” (it can see: {', '.join(info['buckets'])})"
     if info["missing"]:

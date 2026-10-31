@@ -186,6 +186,7 @@ class B2KeyIn(BaseModel):
     application_key: str = ""           # blank / masked = the key already saved with destination_id
     credential_id: Optional[int] = None
     destination_id: Optional[int] = None
+    bucket: str = ""                    # a single-bucket key can only ask about its own bucket
 
 
 @router.post("/destinations/b2-buckets")
@@ -198,7 +199,7 @@ def b2_buckets(data: B2KeyIn, user: User = Depends(require_admin), session: Sess
             key_id = key_id or username or ""
         elif app_key in ("", "••••••••") and data.destination_id:
             app_key = st.dest_config(_get(session, BackupDestination, data.destination_id, "Destination")).get("application_key", "")
-        return st.b2_check(key_id, app_key)
+        return st.b2_check(key_id, app_key, data.bucket)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except RuntimeError as e:
