@@ -36,7 +36,6 @@ def public_status(session: Session = Depends(get_session)):
             "is_up":      latest.is_up      if latest else None,
             "latency_ms": latest.latency_ms if latest else None,
             "checked_at": latest.checked_at.isoformat() if latest else None,
-            "error":      latest.error      if latest else None,
         })
 
     total   = len(items)

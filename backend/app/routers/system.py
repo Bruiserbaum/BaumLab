@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from ..services import integrity, log_collector
 from ..services.auth import require_admin
 from ..services.config_service import read_config, write_config
-from ..services.syslog_listener import DEFAULT_LIMITS, limits
+from ..services.syslog_listener import DEFAULT_LIMITS, DEFAULT_RETENTION_DAYS, limits, retention_days
 
 router = APIRouter(prefix="/api/system", tags=["system"], dependencies=[Depends(require_admin)])
 
@@ -32,11 +32,13 @@ class LogSettingsIn(BaseModel):
     max_network: int = DEFAULT_LIMITS["network"]
     max_container: int = DEFAULT_LIMITS["container"]
     max_audit: int = DEFAULT_LIMITS["audit"]
+    retention_days: int = DEFAULT_RETENTION_DAYS
 
 
 @router.get("/logs")
 def get_log_settings():
     return {**log_collector.settings(), **{f"max_{k}": v for k, v in limits().items()},
+            "retention_days": retention_days(),
             "status": log_collector.status()}
 
 
@@ -50,6 +52,7 @@ def save_log_settings(data: LogSettingsIn):
         "max_network": max(1000, data.max_network),
         "max_container": max(1000, data.max_container),
         "max_audit": max(1000, data.max_audit),
+        "retention_days": min(365, max(1, data.retention_days)),
     }
     write_config(cfg)
     return get_log_settings()

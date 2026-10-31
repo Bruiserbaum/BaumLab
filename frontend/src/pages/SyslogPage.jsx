@@ -12,6 +12,7 @@ const SEV_COLORS = {
 }
 
 const REFRESH_MS = 10_000
+const DOWNLOAD_RANGES = [[10, 'Last 10 minutes'], [60, 'Last hour'], [1440, 'Last day'], [10080, 'Last 7 days']]
 const SOURCE_LABELS = { network: 'Network', container: 'Containers', audit: 'Activity' }
 
 export default function SyslogPage() {
@@ -25,6 +26,7 @@ export default function SyslogPage() {
   const [source, setSource] = useState(params.get('source') || '')   // '' | network | container | audit
   const [loading, setLoading] = useState(false)
   const [selected, setSelected] = useState(null)
+  const [downloading, setDownloading] = useState(false)
   const intervalRef = useRef(null)
 
   const load = useCallback(async () => {
@@ -50,6 +52,26 @@ export default function SyslogPage() {
     intervalRef.current = setInterval(load, REFRESH_MS)
     return () => clearInterval(intervalRef.current)
   }, [load])
+
+  async function download(minutes) {
+    if (!minutes) return
+    setDownloading(true)
+    try {
+      const p = new URLSearchParams({ minutes, severity_max: severityMax })
+      if (host) p.set('host', host)
+      if (search) p.set('search', search)
+      if (source) p.set('source', source)
+      const r = await api(`${API}/api/syslog/download?${p}`)
+      if (!r.ok) { alert(`Download failed (HTTP ${r.status})`); return }
+      const name = (r.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/)?.[1] || 'baumlab-syslog.log'
+      const url = URL.createObjectURL(await r.blob())
+      const a = Object.assign(document.createElement('a'), { href: url, download: name })
+      a.click()
+      URL.revokeObjectURL(url)
+    } finally {
+      setDownloading(false)
+    }
+  }
 
   async function clearAll() {
     if (!confirm('Delete all syslog messages?')) return
@@ -114,6 +136,11 @@ export default function SyslogPage() {
         <button onClick={load} disabled={loading}>
           {loading ? 'Loading…' : 'Refresh'}
         </button>
+        <select value="" onChange={e => download(+e.target.value)} disabled={downloading}
+          style={{ width: 150 }} title="Save a log file with the current filters — for troubleshooting or sharing">
+          <option value="" disabled>{downloading ? 'Preparing…' : '⬇ Download log'}</option>
+          {DOWNLOAD_RANGES.map(([m, label]) => <option key={m} value={m}>{label}</option>)}
+        </select>
         <button className="secondary" onClick={clearAll}>Clear All</button>
         <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text-muted)' }}>
           Auto-refresh every 10 s

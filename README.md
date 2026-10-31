@@ -25,7 +25,7 @@ A self-hosted home lab monitoring, mapping, and security dashboard. Discover eve
 - **Group by** category, host, VLAN, platform, or access type, with search
 - **Device & monitor linking** — IP suggestions (and VLAN auto-fill) from discovered devices; link a monitor to show live up/down
 - **Discovery** — suggests services from running Docker containers (via Portainer) and device port scans; review, edit and add in bulk
-- **Linked pieces**: creating a service can also create its health monitor and a vault entry for its login. **SSH services** (protocol `ssh`) are added to the Terminal using that login.
+- **Linked pieces**: creating a service can also create its health monitor and a vault entry for its login. **SSH services** (protocol `ssh`, or any `tcp` service on port 22) are added to the Terminal using that login.
 - **Docker containers**: link a service to its container (Platform: docker). The service shows the live container state, and clicking it gives start / stop / restart and logs through Portainer. The Docker page shows each container's service, with **+ Service** to add unlinked ones.
 - **Lifecycle status** — active / planned / decommissioned (with date), so retired services stay in the history
 - **Credentials pointer** — link each service to its Vaultwarden item (BaumLab never stores the secret)
@@ -120,6 +120,8 @@ A self-hosted home lab monitoring, mapping, and security dashboard. Discover eve
 - **Restart clean-up**: backup runs and terminal sessions interrupted by a restart are closed out at start-up instead of showing "running" forever.
 - **BaumLab's own logs in Syslog**: container output (api, ui, OpenVAS, or any containers you pick) is collected through the Docker socket and filed under each container's name, with a severity guessed from the text. Resumes from the last saved line after a redeploy. Container logs and network syslog have separate retention limits.
 - **Activity log**: every change made through BaumLab (adding a Portainer connection, saving settings, starting a container, signing in…) is recorded in Syslog under *BaumLab activity*, with who did it and whether it worked.
+- **Retention and export**: Syslog keeps 7 days by default (adjustable on the Health page, plus per-source row limits). **⬇ Download log** saves the last 10 minutes, hour, day or week, with the current filters, as a plain-text file for troubleshooting.
+- **Why a monitor is down**: each failed check records a reason (refused, timed out, can't resolve), shown on the Monitors page and as the status tooltip on Services. An HTTP check that hits an HTTPS port (or the reverse) is flagged with the protocol to switch to.
 
 ### Alerts
 - **Channels**: ntfy, Discord, email (SMTP), generic JSON webhook (Gotify, Home Assistant, …), each with a minimum severity and a test button

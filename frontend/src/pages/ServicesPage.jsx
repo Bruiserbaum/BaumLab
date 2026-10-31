@@ -156,7 +156,7 @@ export default function ServicesPage() {
   const [services, setServices]   = useState([])
   const [devices, setDevices]     = useState([])
   const [monitors, setMonitors]   = useState([])
-  const [statusMap, setStatusMap] = useState({})   // monitor id → status from /api/status/public
+  const [statusMap, setStatusMap] = useState({})   // monitor id → latest result from /api/monitors/latest
   const [groupBy, setGroupBy]     = useState(() => localStorage.getItem('bl_services_group') || 'category')
   const [search, setSearch]       = useState('')
   const [form, setForm]           = useState(blank)
@@ -239,9 +239,9 @@ export default function ServicesPage() {
     api(`${API}/backups/coverage`).then(r => r.ok ? r.json() : {}).then(setBackups).catch(() => {})
     loadContainers()
     if (isAdmin) api(`${API}/terminal/hosts`).then(r => r.ok ? r.json() : []).then(setSshHosts).catch(() => {})
-    fetch(`${API}/status/public`).then(r => r.json()).then(data => {
+    api(`${API}/monitors/latest`).then(r => r.ok ? r.json() : []).then(list => {
       const map = {}
-      for (const m of data.monitors ?? []) map[m.id] = m
+      for (const m of list) map[m.id] = m
       setStatusMap(map)
     }).catch(() => {})
   }
@@ -677,8 +677,10 @@ export default function ServicesPage() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
                         <div style={{ width: 9, height: 9, borderRadius: '50%', flexShrink: 0, background: dot,
                           boxShadow: isDown ? `0 0 5px ${dot}` : 'none' }} />
-                        <span style={{ fontSize: 12, color: dot }}>
+                        <span style={{ fontSize: 12, color: dot, cursor: st?.error ? 'help' : undefined,
+                          textDecoration: st?.error ? 'underline dotted' : undefined }}>
                           {isUp ? 'Up' : isDown ? 'Down' : '—'}
+                          {isUp && st?.error && <span style={{ color: 'var(--yellow)', marginLeft: 4 }}>⚠</span>}
                         </span>
                       </div>
                     </td>

@@ -12,6 +12,19 @@ def list_targets(session: Session = Depends(get_session)):
     return session.exec(select(MonitorTarget).order_by(MonitorTarget.name)).all()
 
 
+@router.get("/latest")
+def latest_results(session: Session = Depends(get_session)):
+    """Latest result per monitor, including why it failed — signed-in only (errors name internal hosts)."""
+    out = []
+    for t in session.exec(select(MonitorTarget)).all():
+        r = session.exec(select(MonitorResult).where(MonitorResult.target_id == t.id)
+                         .order_by(MonitorResult.checked_at.desc()).limit(1)).first()
+        out.append({"id": t.id, "is_up": r.is_up if r else None, "latency_ms": r.latency_ms if r else None,
+                    "status_code": r.status_code if r else None, "error": r.error if r else None,
+                    "checked_at": r.checked_at.isoformat() if r else None})
+    return out
+
+
 @router.post("/", response_model=MonitorTarget)
 def create_target(data: MonitorTargetCreate, session: Session = Depends(get_session)):
     target = MonitorTarget(**data.model_dump())

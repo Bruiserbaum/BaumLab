@@ -176,6 +176,13 @@ def update_service(service_id: int, data: ServiceCreate, session: Session = Depe
     else:
         message = f"Update {service.name} ({', '.join(changed)})"
 
+    if (service.protocol == "ssh" and service.status != "decommissioned"
+            and not session.exec(select(SshHost).where(SshHost.service_id == service.id)).first()):
+        # Became an SSH service — put it on the Terminal page, with its vault login if it has one
+        login = session.exec(select(VaultEntry).where(VaultEntry.service_id == service.id)).first()
+        _ensure_terminal_host(session, service, username=(login.username or "") if login else "",
+                              credential_id=login.id if login else None)
+
     service.updated_at = datetime.utcnow()
     session.add(service)
     session.commit()

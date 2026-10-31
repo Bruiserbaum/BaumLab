@@ -66,7 +66,8 @@ function LogCollection({ api }) {
       <p style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--text-muted)' }}>
         BaumLab follows container output through the Docker socket and files each line in{' '}
         <Link to="/syslog?source=container" style={{ color: 'var(--accent)' }}>Syslog</Link> under the container's name,
-        with a severity guessed from the text (ERROR, WARNING…). Only new lines are collected.
+        with a severity guessed from the text (ERROR, WARNING…). After a redeploy it resumes from the last saved line.
+        Syslog keeps everything (network, containers, activity) for the number of days below, within the row limits.
       </p>
       <label style={{ display: 'flex', gap: 8, fontSize: 13, marginBottom: 10 }}>
         <input type="checkbox" checked={cfg.collect} onChange={e => setCfg(c => ({ ...c, collect: e.target.checked }))} />
@@ -89,10 +90,15 @@ function LogCollection({ api }) {
         Keep successful web-request lines (noisy — off by default)
       </label>
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 10 }}>
-        {[['max_network', 'Keep network syslog rows'], ['max_container', 'Keep container log rows']].map(([k, label]) => (
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--text-muted)' }}>
+          Keep for (days)
+          <input type="number" min={1} max={365} value={cfg.retention_days ?? 7} style={{ width: 90 }}
+            onChange={e => setCfg(c => ({ ...c, retention_days: +e.target.value }))} />
+        </label>
+        {[['max_network', 'Max network syslog rows'], ['max_container', 'Max container log rows'], ['max_audit', 'Max activity rows']].map(([k, label]) => (
           <label key={k} style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--text-muted)' }}>
             {label}
-            <input type="number" min={1000} step={1000} value={cfg[k]} style={{ width: 120 }}
+            <input type="number" min={1000} step={1000} value={cfg[k] ?? ''} style={{ width: 120 }}
               onChange={e => setCfg(c => ({ ...c, [k]: +e.target.value }))} />
           </label>
         ))}

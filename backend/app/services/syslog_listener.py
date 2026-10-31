@@ -11,7 +11,7 @@ Usage (in lifespan):
 """
 import asyncio
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from sqlalchemy import text
 from sqlmodel import Session
 
@@ -21,6 +21,7 @@ from .config_service import read_config
 # Rows kept per source; trimmed by a scheduled job (see trim) instead of on every insert.
 # Separate limits stop chatty container logs from pushing out network device syslog.
 DEFAULT_LIMITS = {"network": 20_000, "container": 30_000, "audit": 10_000}
+DEFAULT_RETENTION_DAYS = 7      # nothing older than this is kept, whatever the row limits allow
 
 
 def limits() -> dict:
@@ -30,10 +31,17 @@ def limits() -> dict:
             "audit": int(cfg.get("max_audit", DEFAULT_LIMITS["audit"]))}
 
 
+def retention_days() -> int:
+    return max(1, int(read_config().get("logs", {}).get("retention_days", DEFAULT_RETENTION_DAYS)))
+
+
 def trim(engine) -> int:
-    """Delete the oldest rows beyond each source's limit. Returns rows deleted."""
+    """Delete rows older than the retention period, then the oldest beyond each source's limit. Returns rows deleted."""
     deleted = 0
+    cutoff = datetime.utcnow() - timedelta(days=retention_days())
     with engine.begin() as conn:
+        deleted += conn.execute(text("DELETE FROM syslogmessage WHERE received_at < :cutoff"),
+                                {"cutoff": cutoff.strftime("%Y-%m-%d %H:%M:%S.%f")}).rowcount or 0
         for source, cap in limits().items():
             result = conn.execute(text(
                 "DELETE FROM syslogmessage WHERE source = :s AND id < "

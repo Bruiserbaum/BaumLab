@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import PlainTextResponse
 from sqlmodel import Session, select, func, delete as sql_delete
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from ..database import get_session
 from ..models.syslog import SyslogMessage, SEVERITY_NAMES, FACILITY_NAMES
@@ -9,6 +10,20 @@ from ..services.auth import get_current_user, require_admin
 
 router = APIRouter(prefix="/api/syslog", tags=["syslog"],
                    dependencies=[Depends(get_current_user)])
+
+
+def _filtered(q, severity_max: int, host: Optional[str], search: Optional[str], source: Optional[str]):
+    q = q.where(SyslogMessage.severity <= severity_max)
+    if source:
+        q = q.where(SyslogMessage.source == source)
+    if host:
+        q = q.where(SyslogMessage.host.contains(host))
+    if search:
+        q = q.where(
+            SyslogMessage.message.contains(search) |
+            SyslogMessage.tag.contains(search)
+        )
+    return q
 
 
 @router.get("/")
@@ -21,16 +36,7 @@ def list_messages(
     offset: int = Query(0, ge=0),
     session: Session = Depends(get_session),
 ):
-    q = select(SyslogMessage).where(SyslogMessage.severity <= severity_max)
-    if source:
-        q = q.where(SyslogMessage.source == source)
-    if host:
-        q = q.where(SyslogMessage.host.contains(host))
-    if search:
-        q = q.where(
-            SyslogMessage.message.contains(search) |
-            SyslogMessage.tag.contains(search)
-        )
+    q = _filtered(select(SyslogMessage), severity_max, host, search, source)
     q = q.order_by(SyslogMessage.received_at.desc()).offset(offset).limit(limit)
     rows = session.exec(q).all()
 
@@ -42,6 +48,42 @@ def list_messages(
         }
         for r in rows
     ]
+
+
+@router.get("/download")
+def download(
+    minutes: int = Query(60, ge=1, le=60 * 24 * 31, description="How far back to export"),
+    severity_max: int = Query(7, ge=0, le=7),
+    host: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    source: Optional[str] = Query(None),
+    session: Session = Depends(get_session),
+):
+    """The last N minutes as a plain-text log file (oldest first) — for troubleshooting or handing to someone."""
+    now = datetime.utcnow()
+    since = now - timedelta(minutes=minutes)
+    q = _filtered(select(SyslogMessage).where(SyslogMessage.received_at >= since), severity_max, host, search, source)
+    rows = session.exec(q.order_by(SyslogMessage.received_at, SyslogMessage.id)).all()
+
+    filters = ", ".join(f"{k}={v}" for k, v in
+                        (("source", source), ("host", host), ("search", search)) if v)
+    if severity_max < 7:
+        filters = ", ".join(x for x in (filters, f"severity<={SEVERITY_NAMES[severity_max]}") if x)
+    lines = [
+        f"# BaumLab syslog export: {since:%Y-%m-%d %H:%M:%S} to {now:%Y-%m-%d %H:%M:%S} UTC, {len(rows)} lines"
+        + (f" ({filters})" if filters else ""),
+        "# time (UTC)          severity   source     host                 message",
+    ]
+    for r in rows:
+        # Docker timestamps are UTC; a device's own syslog clock may not be, so use arrival time for those
+        when = r.timestamp if r.source == "container" and r.timestamp else r.received_at
+        sev = SEVERITY_NAMES.get(r.severity, str(r.severity)).upper()
+        lines.append(f"{when:%Y-%m-%d %H:%M:%S}  {sev:<9}  {r.source:<9}  {(r.host or r.source_ip)[:20]:<20} "
+                     f"{r.message.replace(chr(10), ' ')}")
+    label = f"{minutes}m" if minutes < 60 else f"{minutes // 60}h" if minutes < 1440 else f"{minutes // 1440}d"
+    filename = f"baumlab-syslog-{now:%Y%m%d-%H%M}-last-{label}.log"
+    return PlainTextResponse("\n".join(lines) + "\n",
+                             headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
 @router.get("/stats")

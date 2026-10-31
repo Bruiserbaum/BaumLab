@@ -67,6 +67,11 @@ def run_checks() -> list[dict]:
         live = {i: x for i, x in services.items() if x.status != "decommissioned"}
 
         # ── SSH services ↔ Terminal hosts ──────────────────────────────────────
+        for svc in live.values():
+            if svc.protocol == "tcp" and svc.port == 22:
+                svc.protocol = "ssh"
+                s.add(svc)
+                fixed("Services", f"Marked {svc.name} as SSH (port 22) so it appears in the Terminal", "/services")
         hosts = s.exec(select(SshHost)).all()
         linked_services = {h.service_id for h in hosts if h.service_id}
         for svc in live.values():
@@ -78,7 +83,9 @@ def run_checks() -> list[dict]:
                 s.add(match)
                 fixed("Terminal", f"Linked Terminal host {match.name} to SSH service {svc.name}", "/terminal")
             else:
-                host = SshHost(name=svc.name, address=svc.ip, port=svc.port or 22, username="", service_id=svc.id)
+                login = s.exec(select(VaultEntry).where(VaultEntry.service_id == svc.id)).first()
+                host = SshHost(name=svc.name, address=svc.ip, port=svc.port or 22, service_id=svc.id,
+                               username=(login.username or "") if login else "", credential_id=login.id if login else None)
                 s.add(host)
                 hosts.append(host)
                 fixed("Terminal", f"Added SSH service {svc.name} to the Terminal", "/terminal")

@@ -26,7 +26,7 @@ function ago(isoString) {
 export default function MonitorsPage() {
   const api = useApi()
   const [targets, setTargets]     = useState([])
-  const [statusMap, setStatusMap] = useState({})   // id → status object from /api/status/public
+  const [statusMap, setStatusMap] = useState({})   // id → latest result from /api/monitors/latest
   const [overall, setOverall]     = useState('unknown')
   const [upCount, setUpCount]     = useState(0)
   const [totalCount, setTotalCount] = useState(0)
@@ -36,16 +36,17 @@ export default function MonitorsPage() {
 
   const loadStatus = useCallback(async () => {
     try {
-      const r    = await fetch(`${API}/status/public`)
+      const [r, lr] = await Promise.all([fetch(`${API}/status/public`), api(`${API}/monitors/latest`)])
       const data = await r.json()
       const map  = {}
-      for (const m of data.monitors ?? []) map[m.id] = m
+      // Per-monitor results (with failure reasons) need sign-in; the public summary only has the totals
+      for (const m of (lr.ok ? await lr.json() : data.monitors ?? [])) map[m.id] = m
       setStatusMap(map)
       setOverall(data.overall ?? 'unknown')
       setUpCount(data.up ?? 0)
       setTotalCount(data.total ?? 0)
     } catch { /* ignore — status is cosmetic */ }
-  }, [])
+  }, [api])
 
   async function loadTargets() {
     const r = await api(`${API}/monitors/`)
@@ -221,7 +222,12 @@ export default function MonitorsPage() {
                     </span>
                   </div>
                 </td>
-                <td>{t.name}</td>
+                <td>
+                  {t.name}
+                  {s?.error && (
+                    <div style={{ fontSize: 11, color: isDown ? 'var(--red)' : 'var(--yellow)', marginTop: 2 }}>{s.error}</div>
+                  )}
+                </td>
                 <td style={{ fontFamily: 'monospace' }}>{t.host}</td>
                 <td><span className="badge badge-gray">{t.protocol}</span></td>
                 <td>{t.port ?? '—'}</td>
