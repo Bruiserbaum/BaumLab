@@ -35,7 +35,11 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 @router.get("/version")
 def version():
     from ..main import APP_VERSION
-    return {"version": APP_VERSION}
+    try:
+        built = open("/app/BUILD_TIME").read().strip()
+    except OSError:
+        built = None      # running outside the Docker image
+    return {"version": APP_VERSION, "built": built}
 
 # ── OIDC config ───────────────────────────────────────────────────────────────
 _OIDC_ENABLED           = os.getenv("OIDC_ENABLED", "false").lower() == "true"
