@@ -16,7 +16,7 @@ from .services.auth import hash_password, username_from_token
 from .routers import devices, monitors, scan, unifi, auth, users, settings, external_scan, status, advanced_scan, vuln_scan, services
 from .routers import syslog as syslog_router, portainer as portainer_router, git_sync as git_sync_router
 from .routers import vault as vault_router, updates as updates_router, tools as tools_router, repos as repos_router
-from .routers import backups as backups_router, alerts as alerts_router
+from .routers import backups as backups_router, alerts as alerts_router, recovery_kits as recovery_kits_router
 from .routers import certs as certs_router, dashboard as dashboard_router
 from .routers import icons as icons_router, launchpad as launchpad_router, terminal as terminal_router
 from .routers import system as system_router
@@ -27,7 +27,7 @@ from .services.syslog_listener import start_syslog_listener
 from .routers.portainer import _poll_all
 from .routers.scan import _upsert_devices
 
-APP_VERSION = "1.9.0"  # bump this on every release (minor bump for every merged branch)
+APP_VERSION = "1.10.0"  # bump this on every release (minor bump for every merged branch)
 
 scheduler = AsyncIOScheduler()
 
@@ -261,6 +261,7 @@ app.include_router(updates_router.router)
 app.include_router(tools_router.router)
 app.include_router(repos_router.router)
 app.include_router(backups_router.router)
+app.include_router(recovery_kits_router.router)
 app.include_router(alerts_router.router)
 app.include_router(certs_router.router)
 app.include_router(dashboard_router.router)

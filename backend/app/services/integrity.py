@@ -14,7 +14,7 @@ from typing import Optional
 from sqlmodel import Session, select
 
 from ..database import engine
-from ..models.backup import BackupDestination, BackupJob, BackupRecord, BackupRun, BackupStack
+from ..models.backup import BackupDestination, BackupJob, BackupRecord, BackupRun, BackupStack, RecoveryKit
 from ..models.bookmark import Bookmark
 from ..models.monitor import MonitorTarget
 from ..models.portainer import ContainerSnapshot
@@ -154,7 +154,8 @@ def run_checks() -> list[dict]:
         # ── Backups ────────────────────────────────────────────────────────────
         destinations = {d.id for d in s.exec(select(BackupDestination)).all()}
         targets = [("job", j) for j in s.exec(select(BackupJob)).all()] + \
-                  [("stack", x) for x in s.exec(select(BackupStack)).all()]
+                  [("stack", x) for x in s.exec(select(BackupStack)).all()] + \
+                  [("kit", k) for k in s.exec(select(RecoveryKit)).all()]
         for kind, t in targets:
             ids = json.loads(t.service_ids or "[]")
             kept = [i for i in ids if i in services]
@@ -203,6 +204,11 @@ def _check_runtime(has_backups: bool) -> list[dict]:
                     backup_schedule.schedule_stack(stack)
                     out.append({"key": None, "check": "Backups", "severity": "fixed",
                                 "text": f"Re-registered the schedule for stack backup {stack.name}", "link": "/backups?tab=stacks"})
+            for kit in s.exec(select(RecoveryKit).where(RecoveryKit.enabled == True)).all():  # noqa: E712
+                if kit.schedule_cron and not backup_schedule.next_run("kit", kit.id):
+                    backup_schedule.schedule_kit(kit)
+                    out.append({"key": None, "check": "Backups", "severity": "fixed",
+                                "text": f"Re-registered the schedule for recovery kit {kit.name}", "link": "/backups?tab=kits"})
     except Exception as e:
         out.append({"key": "scheduler", "check": "Backups", "severity": "error",
                     "text": f"Couldn't verify backup schedules: {e}", "link": "/backups"})

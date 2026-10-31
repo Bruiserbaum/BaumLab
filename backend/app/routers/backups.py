@@ -9,7 +9,7 @@ from pydantic import BaseModel, field_validator
 from sqlmodel import Session, select
 
 from ..database import get_session
-from ..models.backup import BackupDestination, BackupJob, BackupRecord, BackupRun, BackupStack
+from ..models.backup import BackupDestination, BackupJob, BackupRecord, BackupRun, BackupStack, RecoveryKit
 from ..models.service import Service
 from ..models.user import User
 from ..models.vault import VaultAudit
@@ -93,7 +93,8 @@ class DestinationIn(BaseModel):
 
 def _dest_dict(d: BackupDestination, session: Session) -> dict:
     used = len(session.exec(select(BackupJob).where(BackupJob.destination_id == d.id)).all()) + \
-           len(session.exec(select(BackupStack).where(BackupStack.destination_id == d.id)).all())
+           len(session.exec(select(BackupStack).where(BackupStack.destination_id == d.id)).all()) + \
+           len(session.exec(select(RecoveryKit).where(RecoveryKit.destination_id == d.id)).all())
     return {"id": d.id, "name": d.name, "type": d.type, "config": st.redact(st.dest_config(d)), "used_by": used}
 
 
@@ -129,7 +130,7 @@ def update_destination(dest_id: int, data: DestinationIn, session: Session = Dep
 def delete_destination(dest_id: int, session: Session = Depends(get_session)):
     d = _get(session, BackupDestination, dest_id, "Destination")
     if _dest_dict(d, session)["used_by"]:
-        raise HTTPException(status_code=409, detail="Destination is used by backup jobs or stacks")
+        raise HTTPException(status_code=409, detail="Destination is used by backup jobs, stacks or recovery kits")
     session.delete(d)
     session.commit()
     return {"ok": True}

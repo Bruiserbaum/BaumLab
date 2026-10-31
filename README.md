@@ -80,6 +80,13 @@ A self-hosted home lab monitoring, mapping, and security dashboard. Discover eve
 - **Updates** — check GitHub for new releases and apply them through Portainer (see [Updates](#updates))
 
 ### Backups (merged from BaumLabBackup)
+- **Recovery kits** — everything needed to rebuild a Docker service from nothing, on any host Portainer manages (no agent needed):
+  - the compose definition (Portainer's stack file, or one reconstructed from the containers' settings), with exact image versions
+  - the environment and container settings, encrypted with a **recovery passphrase** you keep outside BaumLab — each kit carries a small `decrypt-secrets.py`, so it can be opened without BaumLab
+  - every volume and bind mount (media folders can be excluded), copied live or with the service briefly stopped
+  - live dumps of Postgres, MySQL / MariaDB and MongoDB containers, using the credentials already in their environment
+  - a `RESTORE.md` with step-by-step manual rebuild instructions for that service
+  - **one-click restore** to any Portainer environment: recreate volumes and folders, copy the data back, deploy the stack with its environment, optionally import the database dumps
 - **Container jobs**: archive Docker volumes and bind mounts, optional PostgreSQL / MySQL dump, optionally stop containers for a consistent copy (restarted before the upload), cron schedules and retention
 - **Stack backups** for disaster recovery: a compose project's named volumes, its environment (encrypted) and the repo it deploys from
 - **Destinations**: Backblaze B2, SMB / NAS, SFTP, local folder (via rclone; credentials stay encrypted and are only handed to rclone while it runs)

@@ -10,8 +10,8 @@ from apscheduler.triggers.cron import CronTrigger
 from sqlmodel import Session, select
 
 from ..database import engine
-from ..models.backup import BackupJob, BackupRecord, BackupStack
-from . import alerts, backup_engine
+from ..models.backup import BackupJob, BackupRecord, BackupStack, RecoveryKit
+from . import alerts, backup_engine, recovery_kits
 
 _scheduler = None
 MANUAL_STACK_STALE_DAYS = 30
@@ -26,6 +26,8 @@ def init(scheduler):
             schedule_job(job)
         for stack in s.exec(select(BackupStack)).all():
             schedule_stack(stack)
+        for kit in s.exec(select(RecoveryKit)).all():
+            schedule_kit(kit)
 
 
 def parse_cron(expr: str) -> CronTrigger:
@@ -54,6 +56,10 @@ def schedule_job(job: BackupJob):
 
 def schedule_stack(stack: BackupStack):
     _set(f"backup_stack_{stack.id}", backup_engine.run_stack_backup, stack.schedule_cron, stack.enabled, [stack.id])
+
+
+def schedule_kit(kit: RecoveryKit):
+    _set(f"backup_kit_{kit.id}", recovery_kits.run_kit_backup, kit.schedule_cron, kit.enabled, [kit.id])
 
 
 def unschedule(kind: str, target_id: int):
@@ -106,10 +112,11 @@ def check_stale_alerts():
     """Alert once when a job / stack misses its schedule; re-arms when it's fresh again."""
     with Session(engine) as s:
         targets = [("job", j) for j in s.exec(select(BackupJob)).all()] + \
-                  [("stack", x) for x in s.exec(select(BackupStack)).all()]
+                  [("stack", x) for x in s.exec(select(BackupStack)).all()] + \
+                  [("recovery kit", k) for k in s.exec(select(RecoveryKit)).all()]
     for kind, t in targets:
         status = freshness(t.enabled, t.schedule_cron, t.last_run_status, t.last_success_at)
-        prev = alerts.transition(f"backup:{kind}:{t.id}", status)
+        prev = alerts.transition(f"backup:{kind.split()[-1]}:{t.id}", status)
         if status == "stale" and prev is not None:
             last = f"{t.last_success_at:%Y-%m-%d %H:%M} UTC" if t.last_success_at else "never"
             alerts.notify("backup_stale", severity="warning", title=f"⚠️ Backup stale: {t.name}",
@@ -141,6 +148,11 @@ def coverage() -> dict[int, dict]:
             for sid in json.loads(stack.service_ids or "[]"):
                 add(sid, {"kind": "stack", "id": stack.id, "name": stack.name, "status": status,
                           "last_success_at": stack.last_success_at})
+        for kit in s.exec(select(RecoveryKit)).all():
+            status = freshness(kit.enabled, kit.schedule_cron, kit.last_run_status, kit.last_success_at)
+            for sid in json.loads(kit.service_ids or "[]"):
+                add(sid, {"kind": "kit", "id": kit.id, "name": kit.name, "status": status,
+                          "last_success_at": kit.last_success_at})
         for rec in s.exec(select(BackupRecord)).all():
             if not rec.last_verified_at:
                 status = "never"

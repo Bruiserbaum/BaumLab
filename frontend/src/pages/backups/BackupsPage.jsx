@@ -5,10 +5,12 @@ import { API, Notice, RunLog, apiJson } from './common'
 import { Overview, History, ImportTab } from './Overview'
 import Jobs from './Jobs'
 import Stacks from './Stacks'
+import Kits from './Kits'
 import Destinations from './Destinations'
 
 const TABS = [
   ['overview', 'Overview'],
+  ['kits', 'Recovery kits'],
   ['jobs', 'Jobs'],
   ['stacks', 'Stacks'],
   ['destinations', 'Destinations'],
@@ -97,6 +99,7 @@ export default function BackupsPage() {
         <Jobs {...shared} prefill={jobPrefill} clearPrefill={() => setJobPrefill(null)}
           openRun={f => { setHistoryFilter(f); setTab('history') }} />
       )}
+      {tab === 'kits' && <Kits {...shared} openRun={f => { setHistoryFilter(f); setTab('history') }} />}
       {tab === 'stacks' && <Stacks {...shared} openRun={f => { setHistoryFilter(f); setTab('history') }} />}
       {tab === 'destinations' && <Destinations {...shared} reload={loadDestinations} />}
       {tab === 'history' && <History api={api} notify={setNotice} filter={historyFilter} setFilter={setHistoryFilter} openRunLog={setRunLogId} />}

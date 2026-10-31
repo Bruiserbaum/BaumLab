@@ -85,3 +85,27 @@ class BackupRecord(SQLModel, table=True):
     last_verified_at: Optional[datetime] = None
     notes: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class RecoveryKit(SQLModel, table=True):
+    """Everything needed to rebuild one Docker service from nothing, collected through Portainer on any host:
+    compose definition, environment (passphrase-encrypted), every mount's data, database dumps, RESTORE.md."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str
+    connection: str                             # Portainer connection name
+    endpoint_id: int
+    endpoint_name: str = ""
+    project: Optional[str] = None               # compose project / Portainer stack name (None = containers below)
+    containers: str = "[]"                      # JSON list — standalone containers when project is None
+    exclude_mounts: str = "[]"                  # JSON list of "container:/path" mounts to skip (media libraries…)
+    dump_databases: bool = True                 # auto-detected Postgres / MySQL / MariaDB / Mongo containers
+    stop_during_backup: bool = False            # stop the containers while their files are copied
+    destination_id: int = Field(foreign_key="backupdestination.id")
+    schedule_cron: Optional[str] = "30 3 * * *"
+    retention_days: int = 30
+    enabled: bool = True
+    service_ids: str = "[]"
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    last_run_at: Optional[datetime] = None
+    last_run_status: Optional[str] = None
+    last_success_at: Optional[datetime] = None
