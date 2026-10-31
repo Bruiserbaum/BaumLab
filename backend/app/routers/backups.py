@@ -111,7 +111,9 @@ def list_destinations(session: Session = Depends(get_session)):
 def _clean_config(dest_type: str, config: dict, old: dict, session: Session) -> dict:
     """Keep stored secrets when the form sends them masked/blank, and never store a secret
     inline when the destination takes it from a vault entry."""
-    merged = dict(config)
+    # Pasted values often carry a stray space or newline (B2 then answers 401); passwords keep theirs
+    merged = {k: v.strip() if isinstance(v, str) and (k not in st.SECRET_FIELDS or dest_type == "b2") else v
+              for k, v in config.items()}
     cred = merged.get("credential_id")
     if cred in ("", None):
         merged.pop("credential_id", None)
@@ -177,6 +179,30 @@ def delete_destination(dest_id: int, session: Session = Depends(get_session)):
     session.delete(d)
     session.commit()
     return {"ok": True}
+
+
+class B2KeyIn(BaseModel):
+    account_id: str = ""
+    application_key: str = ""           # blank / masked = the key already saved with destination_id
+    credential_id: Optional[int] = None
+    destination_id: Optional[int] = None
+
+
+@router.post("/destinations/b2-buckets")
+def b2_buckets(data: B2KeyIn, user: User = Depends(require_admin), session: Session = Depends(get_session)):
+    """Buckets a B2 application key can reach (for the destination form's bucket picker)."""
+    key_id, app_key = data.account_id, data.application_key
+    try:
+        if data.credential_id:
+            username, app_key = st.vault_credential(data.credential_id, f"{user.username} (listing B2 buckets)")
+            key_id = key_id or username or ""
+        elif app_key in ("", "••••••••") and data.destination_id:
+            app_key = st.dest_config(_get(session, BackupDestination, data.destination_id, "Destination")).get("application_key", "")
+        return st.b2_check(key_id, app_key)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e))
 
 
 @router.post("/destinations/{dest_id}/test", dependencies=admin)
