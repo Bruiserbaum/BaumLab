@@ -31,12 +31,8 @@ def dest_config(dest: BackupDestination) -> dict:
     return json.loads(decrypt(dest.config_enc))
 
 
-def resolved_config(dest: BackupDestination) -> dict:
-    """Destination config with its linked vault credential filled in — only ever held in memory."""
-    cfg = dest_config(dest)
-    cred = cfg.get("credential_id")
-    if not cred:
-        return cfg
+def vault_credential(cred_id: int, actor: str, throttle: Optional[tuple] = None) -> tuple[Optional[str], str]:
+    """(username, secret) of a vault entry, logged in the vault audit (at most hourly per `throttle` key)."""
     from sqlmodel import Session
     from ..database import engine
     from ..models.vault import VaultAudit, VaultEntry
@@ -45,16 +41,25 @@ def resolved_config(dest: BackupDestination) -> dict:
     if reason:
         raise RuntimeError(f"Vault locked: {reason}")
     with Session(engine) as s:
-        entry = s.get(VaultEntry, int(cred))
+        entry = s.get(VaultEntry, int(cred_id))
         if not entry:
-            raise RuntimeError(f"The vault entry this destination uses (#{cred}) no longer exists — edit the destination")
+            raise RuntimeError(f"The vault entry this destination uses (#{cred_id}) no longer exists — edit the destination")
         secret = vault.decrypt(entry.secret_enc) if entry.secret_enc else ""
-        key = (dest.id, entry.id)
-        if time.monotonic() - _last_audit.get(key, -AUDIT_EVERY) >= AUDIT_EVERY:
-            _last_audit[key] = time.monotonic()
-            s.add(VaultAudit(entry_id=entry.id, entry_title=entry.title, actor=f"backup:{dest.name}", action="backup"))
+        if throttle is None or time.monotonic() - _last_audit.get(throttle, -AUDIT_EVERY) >= AUDIT_EVERY:
+            if throttle is not None:
+                _last_audit[throttle] = time.monotonic()
+            s.add(VaultAudit(entry_id=entry.id, entry_title=entry.title, actor=actor, action="backup"))
             s.commit()
-        username = entry.username
+        return entry.username, secret
+
+
+def resolved_config(dest: BackupDestination) -> dict:
+    """Destination config with its linked vault credential filled in — only ever held in memory."""
+    cfg = dest_config(dest)
+    cred = cfg.get("credential_id")
+    if not cred:
+        return cfg
+    username, secret = vault_credential(int(cred), f"backup:{dest.name}", throttle=(dest.id, int(cred)))
     if dest.type in SECRET_BY_TYPE:
         cfg[SECRET_BY_TYPE[dest.type]] = secret
     if dest.type in USER_BY_TYPE and not cfg.get(USER_BY_TYPE[dest.type]) and username:
@@ -66,6 +71,9 @@ def base_path(dest: BackupDestination) -> str:
     """Folder on the remote that holds this destination's archives."""
     cfg = dest_config(dest)
     path = (cfg.get("path") or "").strip("/")
+    if dest.type == "b2" and cfg.get("bucket"):
+        # Bucket picked separately; "path" is the folder inside it (older destinations hold "bucket/folder" in path)
+        path = "/".join(x for x in (cfg["bucket"].strip("/"), path) if x)
     if dest.type == "smb":
         # rclone's smb backend takes the share as the first path element
         share = (cfg.get("share") or "").strip("/")
@@ -85,7 +93,7 @@ def _env(dest: BackupDestination) -> dict:
     cfg = resolved_config(dest)
     p = f"RCLONE_CONFIG_DEST_{dest.id}_"
     if dest.type == "b2":
-        return {p + "TYPE": "b2", p + "ACCOUNT": cfg.get("account_id", ""), p + "KEY": cfg.get("application_key", "")}
+        return {p + "TYPE": "b2", p + "ACCOUNT": cfg.get("account_id", "").strip(), p + "KEY": cfg.get("application_key", "").strip()}
     if dest.type == "smb":
         env = {p + "TYPE": "smb", p + "HOST": cfg.get("host", ""), p + "USER": cfg.get("user", ""),
                p + "DOMAIN": cfg.get("domain", "") or "WORKGROUP"}
@@ -159,13 +167,93 @@ def apply_retention(dest: BackupDestination, sub_dir: str, days: int, name_prefi
     return None if rc == 0 else err.strip()[:300]
 
 
+# ── Backblaze B2 key check / bucket list (straight to the B2 API, for clear answers) ──
+
+B2_AUTH_URL = "https://api.backblazeb2.com/b2api/v3/b2_authorize_account"
+B2_NEEDS = {"listFiles": "list archives", "readFiles": "restore", "writeFiles": "upload backups",
+            "deleteFiles": "remove old archives (retention)"}
+B2_REJECTED = ("Backblaze rejected this Key ID / Application key. Copy both again from Backblaze → Application Keys "
+               "(the application key is only shown once, when the key is created — if it's lost, create a new key). "
+               "The Key ID is the 25-character keyID, not the key's name.")
+
+
+def _b2_message(r) -> str:
+    try:
+        return r.json().get("message") or r.text[:200]
+    except ValueError:
+        return r.text[:200]
+
+
+def b2_check(key_id: str, app_key: str) -> dict:
+    """{buckets, missing: [(capability, what it's for)], prefix} for a B2 application key.
+    Raises ValueError when Backblaze rejects the key, RuntimeError when it can't be checked."""
+    import httpx
+    key_id, app_key = (key_id or "").strip(), (app_key or "").strip()
+    if not key_id or not app_key:
+        raise ValueError("Enter the Key ID and the Application key first")
+    try:
+        r = httpx.get(B2_AUTH_URL, auth=(key_id, app_key), timeout=20)
+    except httpx.HTTPError as e:
+        raise RuntimeError(f"Couldn't reach Backblaze: {e}")
+    if r.status_code in (400, 401):
+        raise ValueError(B2_REJECTED)
+    if r.status_code != 200:
+        raise RuntimeError(f"Backblaze answered {r.status_code}: {_b2_message(r)}")
+    auth = r.json()
+    storage = (auth.get("apiInfo") or {}).get("storageApi") or {}
+    allowed = storage.get("allowed") or {}
+    caps = allowed.get("capabilities") or []
+    if not storage.get("apiUrl") or not auth.get("accountId"):
+        raise RuntimeError("Backblaze answered in an unexpected format")
+    if allowed.get("buckets"):
+        # Key restricted to particular buckets — those are the only ones it can use
+        buckets = sorted(b["name"] for b in allowed["buckets"] if b.get("name"))
+    else:
+        try:
+            r = httpx.post(f"{storage['apiUrl']}/b2api/v3/b2_list_buckets", json={"accountId": auth["accountId"]},
+                           headers={"Authorization": auth["authorizationToken"]}, timeout=20)
+        except httpx.HTTPError as e:
+            raise RuntimeError(f"Couldn't list buckets: {e}")
+        if r.status_code != 200:
+            hint = " — give the key the listBuckets permission, or type the bucket name" if "listBuckets" not in caps else ""
+            raise RuntimeError(f"Couldn't list buckets: {_b2_message(r)}{hint}")
+        buckets = sorted(b["bucketName"] for b in r.json().get("buckets", []))
+    # No capability list at all means an answer shaped differently than expected — don't cry wolf
+    missing = [[c, why] for c, why in B2_NEEDS.items() if c not in caps] if caps else []
+    return {"buckets": buckets, "missing": missing,
+            "prefix": allowed.get("namePrefix")}
+
+
+def _b2_problem(dest: BackupDestination) -> Optional[str]:
+    """Plain-language reason a B2 destination can't work, or None. Warnings come back prefixed '!'."""
+    cfg = resolved_config(dest)
+    try:
+        info = b2_check(cfg.get("account_id", ""), cfg.get("application_key", ""))
+    except ValueError as e:
+        return str(e)
+    except RuntimeError:
+        return None                       # couldn't check — let rclone have a go and report its own error
+    bucket = (cfg.get("bucket") or (cfg.get("path") or "").strip("/").split("/")[0]).strip()
+    if bucket and info["buckets"] and bucket not in info["buckets"]:
+        return f"This key can't see a bucket called “{bucket}” (it can see: {', '.join(info['buckets'])})"
+    if info["missing"]:
+        return "!" + "; ".join(f"the key lacks {c}, so it can't {why}" for c, why in info["missing"])
+    return None
+
+
 def test(dest: BackupDestination) -> tuple[bool, str]:
+    warning = ""
+    if dest.type == "b2":
+        problem = _b2_problem(dest)
+        if problem and not problem.startswith("!"):
+            return False, problem
+        warning = f" — but {problem[1:]}" if problem else ""
     rc, out, err = _run(dest, "lsd", _target(dest), "--max-depth=1", "--contimeout=10s", "--timeout=20s", timeout=60)
     if rc == 0:
-        return True, "Connection successful"
+        return not warning, "Connection successful" + warning
     # An empty / not-yet-created folder is fine — it's created on first upload
     if "directory not found" in err.lower():
-        return True, "Connected — folder will be created on first backup"
+        return not warning, "Connected — folder will be created on first backup" + warning
     return False, (err.strip() or "Connection failed")[:400]
 
 
