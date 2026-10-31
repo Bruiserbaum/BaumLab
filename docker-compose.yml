@@ -83,7 +83,9 @@ services:
   # Default admin credentials are set via OPENVAS_ADMIN_PASSWORD below.
   # ---------------------------------------------------------------------------
   openvas:
-    image: immauss/openvas:latest
+    # Pinned on purpose: "latest" once jumped PostgreSQL 13 → 15 and the image couldn't migrate the
+    # existing database. Change this tag deliberately (and back up openvas-data first) to upgrade.
+    image: immauss/openvas:26.07.27.01
     container_name: baumlab-openvas
     restart: unless-stopped
     hostname: openvas

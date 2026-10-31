@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 
 const API = '/api'
-const PROTOCOLS = ['http', 'https', 'tcp', 'udp']
+const PROTOCOLS = ['http', 'https', 'tcp', 'udp', 'ssh']
 
 const cell = { padding: '4px 6px' }
 const inputStyle = { width: '100%', boxSizing: 'border-box', padding: '4px 6px', fontSize: 12 }
@@ -66,6 +66,11 @@ export default function DiscoverPanel({ api, devices, categories, onClose, onAdd
       vlan: r.vlan !== '' ? +r.vlan : null,
       notes: r.notes || null,
       create_monitor: createMonitors,
+      container_connection: r.container_connection ?? null,
+      container_endpoint_id: r.container_endpoint_id ?? null,
+      container_name: r.container_name ?? null,
+      // SSH rows land on the Terminal page too (admins; add the login there)
+      create_terminal_host: r.protocol === 'ssh',
     }))
     const r = await api(`${API}/services/bulk`, {
       method: 'POST',

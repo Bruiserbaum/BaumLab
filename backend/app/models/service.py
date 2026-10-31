@@ -16,7 +16,7 @@ class Service(SQLModel, table=True):
     platform: Optional[str] = None             # docker | vm | lxc | bare-metal | appliance
     ip: Optional[str] = Field(default=None, index=True)
     port: Optional[int] = None
-    protocol: str = "http"                     # http | https | tcp | udp
+    protocol: str = "http"                     # http | https | tcp | udp | ssh
     vlan: Optional[int] = None
     url: Optional[str] = None                  # Primary access URL (usually the proxied one)
     proxied: bool = False                      # Routed through the reverse proxy
@@ -29,6 +29,10 @@ class Service(SQLModel, table=True):
     launchpad_group: Optional[str] = None      # Launchpad group (None = category)
     launchpad_order: int = 0                   # position within the group
     launchpad_public: bool = False             # visible on the home page without signing in
+    # Docker container this service runs as (a Portainer snapshot: connection + endpoint + name)
+    container_connection: Optional[str] = None
+    container_endpoint_id: Optional[int] = None
+    container_name: Optional[str] = None
     notes: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
@@ -52,9 +56,19 @@ class ServiceCreate(SQLModel):
     credential_ref: Optional[str] = None
     icon: Optional[str] = None
     launchpad: bool = True
+    container_connection: Optional[str] = None
+    container_endpoint_id: Optional[int] = None
+    container_name: Optional[str] = None
     notes: Optional[str] = None
+
+
+class LoginIn(SQLModel):
+    username: Optional[str] = None
+    password: str
 
 
 class ServiceNew(ServiceCreate):
     """Create-only options for the pieces that come with a service."""
     create_monitor: bool = False      # also add a health monitor for ip:port
+    login: Optional[LoginIn] = None   # store a login for it in the vault (admins)
+    create_terminal_host: bool = False   # SSH service: add it to the Terminal page (admins)

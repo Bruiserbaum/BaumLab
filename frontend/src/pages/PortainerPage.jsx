@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
-import { useAuth } from '../auth'
+import { useApi, useAuth } from '../auth'
+import ContainerPanel, { containerKey } from '../components/ContainerPanel'
 
 const API = import.meta.env.VITE_API_URL ?? ''
 const REFRESH_MS = 30_000
@@ -10,7 +11,11 @@ const STATE_COLORS = {
 }
 
 export default function PortainerPage() {
-  const { api, isAdmin } = useAuth()
+  const api = useApi()
+  const { isAdmin } = useAuth()
+  const [services, setServices] = useState([])
+  const [openContainer, setOpenContainer] = useState(null)
+  const [linkError, setLinkError] = useState('')
   const [containers, setContainers] = useState([])
   const [statuses, setStatuses] = useState([])
   const [connFilter, setConnFilter] = useState('All')
@@ -24,6 +29,7 @@ export default function PortainerPage() {
   const [connections, setConnections] = useState([])
   const [form, setForm] = useState({ name: '', url: 'http://', api_key: '', enabled: true })
   const [saving, setSaving] = useState(false)
+  const [saveResult, setSaveResult] = useState(null)
 
   const intervalRef = useRef(null)
 
@@ -34,12 +40,14 @@ export default function PortainerPage() {
       if (connFilter !== 'All') params.set('connection', connFilter)
       if (stateFilter !== 'all') params.set('state', stateFilter)
       if (search) params.set('search', search)
-      const [cR, sR] = await Promise.all([
+      const [cR, sR, svR] = await Promise.all([
         api(`${API}/api/portainer/containers?${params}`),
         api(`${API}/api/portainer/status`),
+        api(`${API}/api/services/`),
       ])
       if (cR.ok) setContainers(await cR.json())
       if (sR.ok) setStatuses(await sR.json())
+      if (svR.ok) setServices(await svR.json())
     } finally {
       setLoading(false)
     }
@@ -49,6 +57,20 @@ export default function PortainerPage() {
     const r = await api(`${API}/api/portainer/connections`)
     if (r.ok) setConnections(await r.json())
   }, [api])
+
+  // Services linked to a container (Services → Platform: docker → Container)
+  const serviceByContainer = Object.fromEntries(services.filter(s => s.container_name).map(s =>
+    [containerKey(s.container_connection, s.container_endpoint_id, s.container_name), s]))
+
+  async function addService(c) {
+    setLinkError('')
+    const r = await api(`${API}/api/services/from-container`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ connection: c.connection_name, endpoint_id: c.endpoint_id, name: c.name }),
+    })
+    if (!r.ok) { setLinkError((await r.json().catch(() => ({}))).detail || `HTTP ${r.status}`); return }
+    load()
+  }
 
   useEffect(() => {
     load()
@@ -73,17 +95,24 @@ export default function PortainerPage() {
   async function saveConnection(e) {
     e.preventDefault()
     setSaving(true)
+    setSaveResult(null)
     try {
       const r = await api(`${API}/api/portainer/connections`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form),
       })
-      if (r.ok) {
-        setForm({ name: '', url: 'http://', api_key: '', enabled: true })
-        setShowForm(false)
-        await loadConnections()
+      const data = await r.json().catch(() => ({}))
+      if (!r.ok) {
+        setSaveResult({ ok: false, message: data.detail || `Save failed (HTTP ${r.status})` })
+        return
       }
+      // Saved either way; the test tells you whether BaumLab can actually use it
+      setSaveResult({ ok: data.test?.ok, message: `Saved ${form.name}. ${data.test?.message ?? ''}` })
+      if (data.test?.ok) setForm({ name: '', url: 'http://', api_key: '', enabled: true })
+      await Promise.all([loadConnections(), load()])
+    } catch (err) {
+      setSaveResult({ ok: false, message: err.message })
     } finally {
       setSaving(false)
     }
@@ -214,10 +243,17 @@ export default function PortainerPage() {
               <input type="checkbox" checked={form.enabled} onChange={e => setForm({ ...form, enabled: e.target.checked })} />
               Enabled
             </label>
-            <button type="submit" disabled={saving}>{saving ? 'Saving…' : 'Add / Update'}</button>
+            <button type="submit" disabled={saving}>{saving ? 'Testing…' : 'Add / Update'}</button>
           </form>
+          {saveResult && (
+            <div style={{ fontSize: 12, marginTop: 8, color: saveResult.ok ? 'var(--green)' : 'var(--red)' }}>
+              {saveResult.ok ? '✓' : '✗'} {saveResult.message}
+            </div>
+          )}
         </div>
       )}
+
+      {linkError && <div style={{ fontSize: 12, color: 'var(--red)', margin: '0 0 8px' }}>✗ {linkError}</div>}
 
       {/* Container table */}
       <div style={{ flex: 1, overflow: 'auto' }}>
@@ -227,6 +263,7 @@ export default function PortainerPage() {
               <th style={th}>Connection</th>
               <th style={th}>Endpoint</th>
               <th style={th}>Name</th>
+              <th style={th}>Service</th>
               <th style={th}>Image</th>
               <th style={th}>State</th>
               <th style={th}>Status</th>
@@ -241,10 +278,18 @@ export default function PortainerPage() {
                 return a.name.localeCompare(b.name)
               })
               .map(c => (
-                <tr key={c.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                <tr key={c.id} style={{ borderBottom: '1px solid var(--border)', cursor: 'pointer' }}
+                  onClick={() => setOpenContainer(c)} title="Details, logs, start / stop / restart">
                   <td style={td}>{c.connection_name}</td>
                   <td style={{ ...td, color: 'var(--text-muted)' }}>{c.endpoint_name}</td>
                   <td style={{ ...td, fontWeight: 500 }}>{c.name}</td>
+                  <td style={td} onClick={e => e.stopPropagation()}>
+                    {serviceByContainer[containerKey(c.connection_name, c.endpoint_id, c.name)]
+                      ? <a href="/services" style={{ color: 'var(--accent)' }}>
+                          {serviceByContainer[containerKey(c.connection_name, c.endpoint_id, c.name)].name}</a>
+                      : <button className="secondary" style={{ fontSize: 11, padding: '1px 8px' }}
+                          onClick={() => addService(c)} title="Add this container to the Services inventory">+ Service</button>}
+                  </td>
                   <td style={{ ...td, color: 'var(--text-muted)', fontFamily: 'monospace', fontSize: 11 }}>
                     {c.image.length > 50 ? c.image.slice(0, 50) + '…' : c.image}
                   </td>
@@ -260,7 +305,7 @@ export default function PortainerPage() {
             }
             {containers.length === 0 && !loading && (
               <tr>
-                <td colSpan={7} style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)' }}>
+                <td colSpan={8} style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)' }}>
                   No containers. Add a Portainer connection in the connection manager above.
                 </td>
               </tr>
@@ -268,6 +313,14 @@ export default function PortainerPage() {
           </tbody>
         </table>
       </div>
+
+      {openContainer && (
+        <ContainerPanel api={api} container={openContainer} onClose={() => setOpenContainer(null)}
+          onChanged={async () => {
+            await load()
+            setOpenContainer(null)
+          }} />
+      )}
     </div>
   )
 }

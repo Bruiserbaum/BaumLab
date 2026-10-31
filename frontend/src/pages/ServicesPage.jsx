@@ -3,9 +3,10 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useApi, useAuth } from '../auth'
 import DiscoverPanel from './DiscoverPanel'
 import IconPicker, { AppIcon } from '../components/IconPicker'
+import ContainerPanel, { ContainerBadge, containerKey } from '../components/ContainerPanel'
 
 const API = '/api'
-const PROTOCOLS = ['http', 'https', 'tcp', 'udp']
+const PROTOCOLS = ['http', 'https', 'tcp', 'udp', 'ssh']
 const PLATFORMS = ['docker', 'vm', 'lxc', 'bare-metal', 'appliance']
 const STATUSES = ['active', 'planned', 'decommissioned']
 const REFRESH_MS = 15_000
@@ -14,12 +15,13 @@ const CATEGORY_SUGGESTIONS = [
   'Security', 'Storage', 'Productivity', 'Development', 'Gaming',
 ]
 
-const blankExtras = { monitor: true, vault: false, vault_username: '', vault_secret: '', backup: false }
+const blankExtras = { monitor: true, vault: false, vault_username: '', vault_secret: '', backup: false, terminal: true }
 
 const blank = {
   name: '', status: 'active', category: '', host: '', platform: '', ip: '', port: '', protocol: 'http',
   vlan: '', url: '', proxied: false, sso: false, external: false, monitor_id: '', credential_ref: '', notes: '',
   icon: '', launchpad: true,
+  container_connection: null, container_endpoint_id: null, container_name: null,
 }
 
 // Each group-by option maps a service to the label of the group it belongs in
@@ -168,6 +170,9 @@ export default function ServicesPage() {
   const [extras, setExtras]       = useState(blankExtras)   // pieces created along with a new service
   const [notice, setNotice]       = useState(null)
   const [pickingIcon, setPickingIcon] = useState(false)
+  const [containers, setContainers] = useState([])          // Portainer snapshots, for links + state
+  const [sshHosts, setSshHosts]     = useState([])          // Terminal hosts (admins)
+  const [openContainer, setOpenContainer] = useState(null)
   const [backups, setBackups]     = useState({})     // service id → { status, sources } from /api/backups/coverage
   const navigate = useNavigate()
 
@@ -194,6 +199,31 @@ export default function ServicesPage() {
     api(`${API}/devices/`).then(r => r.ok ? r.json() : []).then(setDevices).catch(() => {})
   }
 
+  function loadContainers() {
+    api(`${API}/portainer/containers`).then(r => r.ok ? r.json() : []).then(setContainers).catch(() => {})
+  }
+
+  const containerByKey = useMemo(
+    () => Object.fromEntries(containers.map(c => [containerKey(c.connection_name, c.endpoint_id, c.name), c])),
+    [containers],
+  )
+  const hostByService = useMemo(
+    () => Object.fromEntries(sshHosts.filter(h => h.service_id != null).map(h => [h.service_id, h])),
+    [sshHosts],
+  )
+
+  // Picking "docker" as the platform suggests the container whose name matches the service
+  function setPlatform(platform) {
+    setForm(x => {
+      if (platform !== 'docker' || x.container_name) return { ...x, platform }
+      const slug = t => (t || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+      const match = containers.find(c => slug(c.name) === slug(x.name)) ||
+                    containers.find(c => slug(x.name) && slug(c.name).includes(slug(x.name)))
+      return { ...x, platform, ...(match ? { container_connection: match.connection_name,
+        container_endpoint_id: match.endpoint_id, container_name: match.name } : {}) }
+    })
+  }
+
   async function load() {
     await loadServices()
     // Supporting data is best-effort — the page still works without it
@@ -207,6 +237,8 @@ export default function ServicesPage() {
       }).catch(() => {})
     }
     api(`${API}/backups/coverage`).then(r => r.ok ? r.json() : {}).then(setBackups).catch(() => {})
+    loadContainers()
+    if (isAdmin) api(`${API}/terminal/hosts`).then(r => r.ok ? r.json() : []).then(setSshHosts).catch(() => {})
     fetch(`${API}/status/public`).then(r => r.json()).then(data => {
       const map = {}
       for (const m of data.monitors ?? []) map[m.id] = m
@@ -266,7 +298,16 @@ export default function ServicesPage() {
       body[k] = body[k]?.trim() || null
     }
     const isNew = editId == null
-    if (isNew) body.create_monitor = extras.monitor && !body.monitor_id && !!body.ip
+    if (body.platform !== 'docker') Object.assign(body, { container_connection: null, container_endpoint_id: null, container_name: null })
+    const isSsh = body.protocol === 'ssh'
+    if (isNew) {
+      body.create_monitor = extras.monitor && !body.monitor_id && !!body.ip
+      // Login goes to the vault server-side, linked to the service (and to its Terminal host for SSH)
+      if (isAdmin && extras.vault && extras.vault_secret) {
+        body.login = { username: extras.vault_username.trim() || null, password: extras.vault_secret }
+      }
+      body.create_terminal_host = isAdmin && isSsh && extras.terminal && !!body.ip
+    }
     const r = await api(isNew ? `${API}/services/` : `${API}/services/${editId}`, {
       method: isNew ? 'POST' : 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -279,21 +320,9 @@ export default function ServicesPage() {
     const saved = await r.json()
     const done = [isNew ? `Added ${saved.name}` : `Saved ${saved.name}`]
     if (body.create_monitor && saved.monitor_id) done.push('monitor created')
-
-    // The vault has its own admin + safety checks, so it's a separate call; the service is kept either way
-    if (isNew && extras.vault && extras.vault_secret) {
-      const v = await api(`${API}/vault/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          service_id: saved.id, title: `${saved.name} login`, username: extras.vault_username.trim() || null,
-          secret: extras.vault_secret, url: saved.url || directUrl(saved),
-        }),
-      })
-      if (v.ok) done.push('credentials saved to vault')
-      else done.push(`vault entry failed: ${(await v.json().catch(() => ({}))).detail || `HTTP ${v.status}`}`)
-    }
-    setNotice({ ok: !done.some(d => d.includes('failed')), text: done.join(' · ') })
+    if (body.login) done.push('login saved to vault')
+    if (body.create_terminal_host) done.push(body.login ? 'added to Terminal' : 'added to Terminal — add its login there')
+    setNotice({ ok: true, text: done.join(' · ') })
     const wantsBackup = isNew && isAdmin && extras.backup
     cancelForm()
     if (wantsBackup) { navigate(`/backups?tab=jobs&service=${saved.id}`); return }
@@ -459,11 +488,34 @@ export default function ServicesPage() {
                 onChange={e => setForm(x => ({ ...x, host: e.target.value }))} />
             </Field>
             <Field label="Platform">
-              <select value={form.platform} onChange={e => setForm(x => ({ ...x, platform: e.target.value }))}>
+              <select value={form.platform} onChange={e => setPlatform(e.target.value)}>
                 <option value="">—</option>
                 {PLATFORMS.map(p => <option key={p}>{p}</option>)}
               </select>
             </Field>
+            {form.platform === 'docker' && (
+              <Field label="Container (from Portainer)">
+                <select style={{ maxWidth: 280 }}
+                  value={form.container_name ? containerKey(form.container_connection, form.container_endpoint_id, form.container_name) : ''}
+                  onChange={e => {
+                    const c = containerByKey[e.target.value]
+                    setForm(x => ({ ...x, container_connection: c?.connection_name ?? null,
+                                    container_endpoint_id: c?.endpoint_id ?? null, container_name: c?.name ?? null }))
+                  }}>
+                  <option value="">{containers.length ? '— not linked —' : 'no Portainer containers yet'}</option>
+                  {form.container_name && !containerByKey[containerKey(form.container_connection, form.container_endpoint_id, form.container_name)] && (
+                    <option value={containerKey(form.container_connection, form.container_endpoint_id, form.container_name)}>
+                      {form.container_name} (not seen in last poll)
+                    </option>
+                  )}
+                  {[...containers].sort((a, b) => a.name.localeCompare(b.name)).map(c => (
+                    <option key={c.id} value={containerKey(c.connection_name, c.endpoint_id, c.name)}>
+                      {c.name} — {c.endpoint_name} ({c.state})
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            )}
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 12 }}>
             <Field label="IP address">
@@ -531,11 +583,22 @@ export default function ServicesPage() {
                   <Check label="Vault entry with login" checked={extras.vault}
                     onChange={v => setExtras(x => ({ ...x, vault: v }))} />
                 )}
+                {isAdmin && form.protocol === 'ssh' && (
+                  <span title={!form.ip ? 'Needs an IP address' : 'Adds it to the Terminal page, using the login below'}>
+                    <Check label="Terminal host" checked={extras.terminal && !!form.ip}
+                      onChange={v => setExtras(x => ({ ...x, terminal: v }))} />
+                  </span>
+                )}
                 {isAdmin && (
                   <Check label="Set up a backup job next" checked={extras.backup}
                     onChange={v => setExtras(x => ({ ...x, backup: v }))} />
                 )}
               </div>
+              {isAdmin && form.protocol === 'ssh' && extras.terminal && !extras.vault && (
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
+                  Tick "Vault entry with login" to connect straight away — otherwise add the login on the Terminal page.
+                </div>
+              )}
               {isAdmin && extras.vault && (
                 <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
                   <Field label="Username">
@@ -648,6 +711,21 @@ export default function ServicesPage() {
                     <td>
                       {s.host || '—'}
                       {s.platform && <span className="badge badge-gray" style={{ marginLeft: 6 }}>{s.platform}</span>}
+                      {s.container_name && (
+                        <span style={{ marginLeft: 6 }}>
+                          <ContainerBadge
+                            container={containerByKey[containerKey(s.container_connection, s.container_endpoint_id, s.container_name)]}
+                            onClick={() => {
+                              const c = containerByKey[containerKey(s.container_connection, s.container_endpoint_id, s.container_name)]
+                              if (c) setOpenContainer(c)
+                            }} />
+                        </span>
+                      )}
+                      {isAdmin && s.protocol === 'ssh' && (hostByService[s.id]
+                        ? <button className="secondary" title="Open a terminal" style={{ marginLeft: 6, padding: '1px 8px', fontSize: 11 }}
+                            onClick={() => navigate(`/terminal?host=${hostByService[s.id].id}`)}>›_</button>
+                        : <button className="secondary" title="Add this service to the Terminal page" style={{ marginLeft: 6, padding: '1px 8px', fontSize: 11 }}
+                            onClick={() => navigate(`/terminal?service=${s.id}`)}>+ Terminal</button>)}
                     </td>
                     <td style={{ fontFamily: 'monospace' }}>
                       {direct
@@ -696,6 +774,14 @@ export default function ServicesPage() {
           </table>
         </div>
       ))}
+
+      {openContainer && (
+        <ContainerPanel api={api} container={openContainer} onClose={() => setOpenContainer(null)}
+          onChanged={() => api(`${API}/portainer/containers`).then(r => r.ok ? r.json() : []).then(list => {
+            setContainers(list)
+            setOpenContainer(c => list.find(x => x.id === c?.id || (x.name === c?.name && x.endpoint_id === c?.endpoint_id)) ?? c)
+          }).catch(() => {})} />
+      )}
     </div>
   )
 }

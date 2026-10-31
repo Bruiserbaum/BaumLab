@@ -25,7 +25,8 @@ A self-hosted home lab monitoring, mapping, and security dashboard. Discover eve
 - **Group by** category, host, VLAN, platform, or access type, with search
 - **Device & monitor linking** — IP suggestions (and VLAN auto-fill) from discovered devices; link a monitor to show live up/down
 - **Discovery** — suggests services from running Docker containers (via Portainer) and device port scans; review, edit and add in bulk
-- **Linked pieces** — creating a service can also create its health monitor and a vault entry for its login
+- **Linked pieces**: creating a service can also create its health monitor and a vault entry for its login. **SSH services** (protocol `ssh`) are added to the Terminal using that login.
+- **Docker containers**: link a service to its container (Platform: docker). The service shows the live container state, and clicking it gives start / stop / restart and logs through Portainer. The Docker page shows each container's service, with **+ Service** to add unlinked ones.
 - **Lifecycle status** — active / planned / decommissioned (with date), so retired services stay in the history
 - **Credentials pointer** — link each service to its Vaultwarden item (BaumLab never stores the secret)
 - **Export to PDF** — printer-friendly inventory with check-off boxes for auditing what you actually have running
@@ -111,6 +112,12 @@ A self-hosted home lab monitoring, mapping, and security dashboard. Discover eve
 - **TLS expiry tracking** for every service with an `https://` URL or https protocol, plus hosts you add
 - Issuer, covered names, expiry date, trusted vs self-signed; checked daily or on demand
 - Alerts at 21 days, 7 days and on expiry
+
+### Health (self-maintenance)
+- **Background consistency checks** every 15 minutes (and on demand, Admin → Health). These keep linked pieces in sync and repair what's safe automatically: SSH services ↔ Terminal hosts, links to deleted vault entries / monitors / services, Docker services ↔ containers, backup job service lists, missing icons, and backup schedules that dropped out of the scheduler.
+- **Reports what needs a decision**, with one alert per problem: a vanished container, a Terminal host without a login, an unreachable OpenVAS, stale Portainer data, failing Git sync, a locked vault, a missing Docker socket.
+- **Restart clean-up**: backup runs and terminal sessions interrupted by a restart are closed out at start-up instead of showing "running" forever.
+- **BaumLab's own logs in Syslog**: container output (api, ui, OpenVAS, or any containers you pick) is collected through the Docker socket and filed under each container's name, with a severity guessed from the text. Container logs and network syslog have separate retention limits.
 
 ### Alerts
 - **Channels**: ntfy, Discord, email (SMTP), generic JSON webhook (Gotify, Home Assistant, …), each with a minimum severity and a test button

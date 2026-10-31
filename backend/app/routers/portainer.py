@@ -8,7 +8,7 @@ from ..database import get_session, engine
 from ..models.portainer import ContainerSnapshot
 from ..services.auth import get_current_user, require_admin
 from ..services.config_service import read_config, write_config, encrypt, decrypt
-from ..services.portainer_client import fetch_containers, upsert_containers
+from ..services.portainer_client import fetch_containers, upsert_containers, container_action, container_logs
 
 router = APIRouter(prefix="/api/portainer", tags=["portainer"],
                    dependencies=[Depends(get_current_user)])
@@ -39,8 +39,27 @@ def list_connections():
     ]
 
 
+async def _test_connection(url: str, api_key: str) -> dict:
+    """Try the saved connection right away so problems show up in the UI, not just the logs."""
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=10.0, verify=False, follow_redirects=False,
+                                     headers={"X-API-Key": api_key} if api_key else {}) as client:
+            r = await client.get(f"{url}/api/endpoints")
+    except httpx.HTTPError as e:
+        return {"ok": False, "message": f"Can't reach {url}: {e}"}
+    if r.status_code in (301, 302, 303, 307, 308):
+        return {"ok": False, "message": f"{url} redirects to {r.headers.get('location', 'a login page')} — probably "
+                                        "Authentik in front of Portainer. Use Portainer's direct address, e.g. https://<host>:9443"}
+    if r.status_code in (401, 403):
+        return {"ok": False, "message": "Portainer rejected the API key (create one under My account → Access tokens)"}
+    if r.status_code != 200 or not r.headers.get("content-type", "").startswith("application/json"):
+        return {"ok": False, "message": f"Unexpected answer from {url} (HTTP {r.status_code}) — is this Portainer's address?"}
+    return {"ok": True, "message": f"Connected — {len(r.json())} environment(s)"}
+
+
 @router.post("/connections", dependencies=[Depends(require_admin)])
-def save_connection(payload: ConnectionIn):
+async def save_connection(payload: ConnectionIn):
     cfg = read_config()
     portainer = cfg.setdefault("portainer", {})
     connections: list = portainer.setdefault("connections", [])
@@ -55,10 +74,13 @@ def save_connection(payload: ConnectionIn):
     existing["url"] = payload.url.rstrip("/")
     existing["enabled"] = payload.enabled
     if payload.api_key and payload.api_key != MASK:
-        existing["api_key"] = encrypt(payload.api_key)
+        existing["api_key"] = encrypt(payload.api_key.strip())
 
     write_config(cfg)
-    return {"status": "saved"}
+    test = await _test_connection(existing["url"], decrypt(existing.get("api_key", "")))
+    if test["ok"]:
+        await _poll_all()      # show containers now rather than at the next scheduled poll
+    return {"status": "saved", "test": test}
 
 
 @router.delete("/connections/{name}", dependencies=[Depends(require_admin)])
@@ -145,3 +167,34 @@ async def _poll_all():
             print(f"Portainer '{name}': {len(containers)} containers updated")
         except Exception as e:
             print(f"Portainer poll failed for '{name}': {e}")
+
+
+# ── Container actions ──────────────────────────────────────────────────────────
+
+class ContainerActionIn(BaseModel):
+    connection: str
+    endpoint_id: int
+    container: str           # container id or name
+    action: str              # start | stop | restart
+
+
+@router.post("/containers/action", dependencies=[Depends(require_admin)])
+async def run_container_action(data: ContainerActionIn):
+    try:
+        await container_action(data.connection, data.endpoint_id, data.container, data.action)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    await _poll_all()          # refresh states so the UI shows the result straight away
+    return {"ok": True}
+
+
+@router.get("/containers/logs", dependencies=[Depends(require_admin)])
+async def get_container_logs(connection: str, endpoint_id: int, container: str, tail: int = 200):
+    try:
+        return {"logs": await container_logs(connection, endpoint_id, container, min(max(tail, 10), 2000))}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))

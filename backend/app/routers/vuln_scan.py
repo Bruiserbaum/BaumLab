@@ -31,13 +31,47 @@ def _get_service() -> OpenVasService:
     )
 
 
+def _diagnose_container(host: str) -> Optional[str]:
+    """When the OpenVAS host name doesn't resolve, use the Docker socket to say why."""
+    import socket as pysocket
+    try:
+        import docker
+        client = docker.from_env(timeout=10)
+        me = client.containers.get(pysocket.gethostname())   # container hostname = its short id
+    except Exception:
+        return None
+    my_nets = set((me.attrs.get("NetworkSettings", {}).get("Networks") or {}).keys())
+    candidates = [c for c in client.containers.list(all=True)
+                  if "openvas" in c.name.lower() or "openvas" in (c.attrs.get("Config", {}).get("Image") or "").lower()]
+    if not candidates:
+        return "No OpenVAS container exists on this Docker host — redeploy the stack, or set Host to where OpenVAS runs."
+    c = candidates[0]
+    if c.status != "running":
+        return (f"Container {c.name} is {c.status}. Start it (docker start {c.name}) and check "
+                f"docker logs {c.name} if it keeps stopping.")
+    nets = c.attrs.get("NetworkSettings", {}).get("Networks") or {}
+    shared = my_nets & set(nets)
+    if not shared:
+        return (f"{c.name} is running but on network(s) {', '.join(nets) or 'none'}, while BaumLab is on "
+                f"{', '.join(sorted(my_nets))}. Fix: docker network connect {sorted(my_nets)[0]} {c.name}")
+    names = set(nets[next(iter(shared))].get("Aliases") or []) | set(nets[next(iter(shared))].get("DNSNames") or [])
+    if host not in names and c.name != host:
+        return f"{c.name} is reachable but not as '{host}' — set Host to {c.name}."
+    return None
+
+
 @router.get("/health")
 def health():
     try:
         svc = _get_service()
     except HTTPException:
         return {"connected": False, "error": "OpenVAS not configured"}
-    return svc.check_connection()
+    result = svc.check_connection()
+    if not result.get("connected") and svc.host and "name resolution" in str(result.get("error", "")).lower():
+        hint = _diagnose_container(svc.host)
+        if hint:
+            result["error"] = f"Can't find '{svc.host}' — {hint}"
+    return result
 
 
 @router.get("/configs")

@@ -12,12 +12,34 @@ Usage (in lifespan):
 import asyncio
 import re
 from datetime import datetime
-from sqlmodel import Session, select, func
+from sqlalchemy import text
+from sqlmodel import Session
 
 from ..models.syslog import SyslogMessage
+from .config_service import read_config
 
-# Keep only this many rows; trim oldest on insert
-MAX_SYSLOG_ROWS = 10_000
+# Rows kept per source; trimmed by a scheduled job (see trim) instead of on every insert.
+# Separate limits stop chatty container logs from pushing out network device syslog.
+DEFAULT_LIMITS = {"network": 20_000, "container": 30_000}
+
+
+def limits() -> dict:
+    cfg = read_config().get("logs", {})
+    return {"network": int(cfg.get("max_network", DEFAULT_LIMITS["network"])),
+            "container": int(cfg.get("max_container", DEFAULT_LIMITS["container"]))}
+
+
+def trim(engine) -> int:
+    """Delete the oldest rows beyond each source's limit. Returns rows deleted."""
+    deleted = 0
+    with engine.begin() as conn:
+        for source, cap in limits().items():
+            result = conn.execute(text(
+                "DELETE FROM syslogmessage WHERE source = :s AND id < "
+                "(SELECT id FROM syslogmessage WHERE source = :s ORDER BY id DESC LIMIT 1 OFFSET :cap)"
+            ), {"s": source, "cap": max(cap, 100)})
+            deleted += result.rowcount or 0
+    return deleted
 
 _RFC5424_RE = re.compile(
     r'^<(?P<pri>\d+)>1 (?P<ts>\S+) (?P<host>\S+) (?P<app>\S+) \S+ \S+ (?:\S+|-) (?P<msg>.*)$',
@@ -84,16 +106,6 @@ def _parse(raw: str, source_ip: str) -> SyslogMessage:
 def _store(engine, msg: SyslogMessage):
     with Session(engine) as session:
         session.add(msg)
-        # Trim to MAX_SYSLOG_ROWS
-        count = session.exec(
-            select(func.count()).select_from(SyslogMessage)
-        ).one()
-        if count > MAX_SYSLOG_ROWS:
-            oldest = session.exec(
-                select(SyslogMessage).order_by(SyslogMessage.received_at).limit(count - MAX_SYSLOG_ROWS)
-            ).all()
-            for row in oldest:
-                session.delete(row)
         session.commit()
 
 

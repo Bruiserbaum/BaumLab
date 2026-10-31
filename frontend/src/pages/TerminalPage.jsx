@@ -3,6 +3,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
+import { useSearchParams } from 'react-router-dom'
 import { useApi, useAuth } from '../auth'
 
 const API = '/api/terminal'
@@ -274,6 +275,7 @@ export default function TerminalPage() {
   const [testResult, setTestResult] = useState({})
   const [showLog, setShowLog] = useState(false)
   const [sessions, setSessions] = useState([])
+  const [params, setParams] = useSearchParams()
 
   async function load() {
     const r = await api(`${API}/hosts`)
@@ -282,6 +284,24 @@ export default function TerminalPage() {
     else { setHosts([]); setLocked(data.detail || `HTTP ${r.status}`) }
   }
   useEffect(() => { if (isAdmin) load() }, [isAdmin])
+
+  // Links from the Services page: ?host=<id> opens a tab, ?service=<id> starts "Add host" pre-filled
+  useEffect(() => {
+    if (!hosts) return
+    const hostId = Number(params.get('host'))
+    const serviceId = Number(params.get('service'))
+    if (hostId) {
+      const h = hosts.find(x => x.id === hostId)
+      if (h) open(h)
+      setParams({})
+    } else if (serviceId) {
+      api('/api/services/').then(r => r.ok ? r.json() : []).then(list => {
+        const s = list.find(x => x.id === serviceId)
+        if (s) setEditing({ name: s.name, address: s.ip || '', port: s.port || 22, service_id: s.id })
+      }).catch(() => {})
+      setParams({})
+    }
+  }, [hosts])
   useEffect(() => {
     if (showLog) call(api, `${API}/sessions?limit=50`).then(setSessions).catch(() => {})
   }, [showLog, tabs.length])
