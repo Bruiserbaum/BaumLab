@@ -32,10 +32,18 @@ import './styles.css'
 function App() {
   const { token, user, logout, isAdmin, authChecking } = useAuth()
   const [appVersion, setAppVersion] = useState('')
+  const [apiBuilt, setApiBuilt] = useState(null)
+  const [staleUi, setStaleUi] = useState(false)
   const [newVersion, setNewVersion] = useState('')
 
   useEffect(() => {
-    fetch('/api/auth/version').then(r => r.ok ? r.json() : null).then(d => { if (d) setAppVersion(d.version) })
+    fetch('/api/auth/version').then(r => r.ok ? r.json() : null).then(d => {
+      if (!d) return
+      setAppVersion(d.version)
+      setApiBuilt(d.built)
+      // Both images build within minutes of each other on a redeploy; a much older page means a cached bundle
+      if (d.built && new Date(d.built) - new Date(__UI_BUILT__) > 30 * 60 * 1000) setStaleUi(true)
+    })
   }, [])
 
   useEffect(() => {
@@ -102,9 +110,16 @@ function App() {
               Sign Out
             </button>
             {appVersion && (
-              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 8, textAlign: 'center', opacity: 0.6 }}>
-                v{appVersion}
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 8, textAlign: 'center', opacity: 0.6 }}
+                title={`API built ${apiBuilt ? new Date(apiBuilt).toLocaleString() : 'unknown'}\nPage built ${new Date(__UI_BUILT__).toLocaleString()}`}>
+                v{appVersion}{apiBuilt && ` · ${new Date(apiBuilt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} ${new Date(apiBuilt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`}
               </div>
+            )}
+            {staleUi && (
+              <a href="#" onClick={e => { e.preventDefault(); window.location.reload() }}
+                style={{ display: 'block', fontSize: 11, textAlign: 'center', marginTop: 4, color: 'var(--yellow)' }}>
+                ↻ New build deployed — reload
+              </a>
             )}
             {newVersion && (
               <NavLink to="/settings" style={{ fontSize: 11, textAlign: 'center', margin: '4px 0 0', padding: 4,

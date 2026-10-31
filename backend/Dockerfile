@@ -19,4 +19,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
+# Build stamp shown next to the version, so you can tell which deploy is running
+RUN date -u +"%Y-%m-%dT%H:%M:%SZ" > /app/BUILD_TIME
+
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

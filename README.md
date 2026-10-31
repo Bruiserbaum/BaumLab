@@ -177,7 +177,6 @@ docker compose up -d
 |---------|-----|
 | Dashboard | http://localhost:3100 |
 | API docs | http://localhost:8100/docs |
-| OpenVAS UI | http://localhost:9392 |
 
 > **First run:** OpenVAS takes 15–60 minutes to sync its vulnerability feed before scans can run.
 
@@ -197,7 +196,6 @@ docker compose up -d
 | `UI_PORT` | `3100` | Frontend container port |
 | `OPENVAS_ADMIN_USERNAME` | `admin` | OpenVAS admin user |
 | `OPENVAS_ADMIN_PASSWORD` | `changeme` | **Change this.** OpenVAS admin password |
-| `OPENVAS_PORT` | `9392` | Greenbone Security Assistant port |
 | `OIDC_ENABLED` | `false` | Set to `true` to enable Authentik SSO login |
 | `OIDC_ISSUER` | — | Authentik provider URL — `https://auth.yourdomain.com/application/o/<app-slug>/` |
 | `OIDC_CLIENT_ID` | — | OAuth2 client ID from Authentik |

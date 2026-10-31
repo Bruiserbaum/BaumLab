@@ -95,8 +95,8 @@ services:
     environment:
       - USERNAME=${OPENVAS_ADMIN_USERNAME:-admin}
       - PASSWORD=${OPENVAS_ADMIN_PASSWORD:-changeme}
-    ports:
-      - "${OPENVAS_PORT:-9392}:9392"    # Greenbone Security Assistant web UI (optional)
+    # No published ports: BaumLab reaches OpenVAS over the private stack network (openvas:9390).
+    # To open Greenbone's own web UI on your LAN, add:  ports: ["9392:9392"]
     networks:
       - baumlab
 
