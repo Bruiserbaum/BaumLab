@@ -202,6 +202,10 @@ def run_job_backup(job_id: int):
         for m in json.loads(job.volumes or "[]"):
             kind = m.get("type", "volume")
             source = m.get("source") or m.get("name")
+            if kind == "bind" and dk.system_mount(source):
+                # Jobs saved before such mounts were left out of the picker still list e.g. docker.sock
+                run.log(f"  Skipped {source} (a socket, not data)")
+                continue
             archive_name = f"{dk.safe_name(m.get('name') or source)}.tar.gz"
             while archive_name in used:
                 archive_name = archive_name.replace(".tar.gz", "_.tar.gz")
@@ -210,6 +214,8 @@ def run_job_backup(job_id: int):
                 size = dk.archive_mount(source, archive_name, mount_dir)
                 manifest_mounts.append({"type": kind, "source": source, "archive": f"mounts/{archive_name}"})
                 run.log(f"  Archived {kind} {source}: {size:,} bytes")
+            except dk.SkippedMount as e:
+                run.log(f"  Skipped {e}")
             except Exception as e:
                 run.log(f"Failed to archive {kind} {source}: {e}", warning=True)
 

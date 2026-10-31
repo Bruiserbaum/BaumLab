@@ -13,10 +13,23 @@ import tarfile
 from typing import Any, Optional
 
 import docker
-from docker.errors import DockerException, NotFound
+from docker.errors import ContainerError, DockerException, NotFound
 
 HELPER_IMAGE = "alpine:3.20"
 BACKUP_TMP_DIR = os.getenv("BACKUP_TMP_DIR", "/tmp/baumlab-backup")
+
+# Mounts that are plumbing, not data: Docker's control socket, devices, runtime dirs, host time / DNS files
+_SYSTEM_PREFIXES = ("/var/run", "/run", "/dev", "/proc", "/sys")
+_SYSTEM_EXACT = {"/etc/localtime", "/etc/timezone", "/etc/hosts", "/etc/resolv.conf", "/etc/hostname"}
+
+
+class SkippedMount(Exception):
+    """The mount turned out to be a socket — nothing to back up."""
+
+
+def system_mount(source: str, destination: str = "") -> bool:
+    return (source.endswith(".sock") or destination in _SYSTEM_EXACT
+            or any(destination == p or destination.startswith(p + "/") for p in _SYSTEM_PREFIXES))
 
 
 def _client() -> docker.DockerClient:
@@ -44,6 +57,8 @@ def _mounts(attrs: dict) -> list[dict]:
     out = []
     for m in attrs.get("Mounts", []) or []:
         if m.get("Type") not in ("volume", "bind") or not m.get("Source"):
+            continue
+        if system_mount(m["Source"], m.get("Destination", "")):
             continue
         out.append({
             "type": m["Type"],
@@ -127,13 +142,22 @@ def project_env(compose_project: str) -> Optional[str]:
 # ── Archive / restore mounts ───────────────────────────────────────────────────
 
 def archive_mount(source: str, archive_name: str, out_dir: str) -> int:
-    """tar.gz a named volume or host path into out_dir/archive_name. Returns size in bytes."""
-    _client().containers.run(
-        HELPER_IMAGE,
-        ["tar", "czf", f"/backup/{archive_name}", "-C", "/data", "."],
-        volumes={source: {"bind": "/data", "mode": "ro"}, out_dir: {"bind": "/backup", "mode": "rw"}},
-        remove=True,
-    )
+    """tar.gz a named volume or host path (folder or single file) into out_dir/archive_name. Returns size in bytes.
+    Raises SkippedMount for a socket."""
+    out = f"/backup/{archive_name}"
+    try:
+        _client().containers.run(
+            HELPER_IMAGE,
+            # exit 3 = a socket; a single file is stored as one entry named "data"
+            ["sh", "-c", f"[ -S /data ] && exit 3; if [ -d /data ]; then tar czf '{out}' -C /data .; "
+                         f"else tar czf '{out}' -C / data; fi"],
+            volumes={source: {"bind": "/data", "mode": "ro"}, out_dir: {"bind": "/backup", "mode": "rw"}},
+            remove=True,
+        )
+    except ContainerError as e:
+        if e.exit_status == 3:
+            raise SkippedMount(f"{source} is a socket, not data")
+        raise
     return os.path.getsize(os.path.join(out_dir, archive_name))
 
 
@@ -148,7 +172,9 @@ def restore_mount(target: str, kind: str, archive_path: str) -> None:
     folder, name = os.path.split(archive_path)
     client.containers.run(
         HELPER_IMAGE,
-        ["sh", "-c", f"find /data -mindepth 1 -delete; tar xzf '/backup/{name}' -C /data"],
+        # A single-file bind is written back in place (same file, so the container's mount still sees it)
+        ["sh", "-c", f"if [ -d /data ]; then find /data -mindepth 1 -delete; tar xzf '/backup/{name}' -C /data; "
+                     f"else tar xzf '/backup/{name}' -O > /data; fi"],
         volumes={target: {"bind": "/data", "mode": "rw"}, folder: {"bind": "/backup", "mode": "ro"}},
         remove=True,
     )
