@@ -31,6 +31,7 @@ class LogSettingsIn(BaseModel):
     keep_access_logs: bool = False
     max_network: int = DEFAULT_LIMITS["network"]
     max_container: int = DEFAULT_LIMITS["container"]
+    max_audit: int = DEFAULT_LIMITS["audit"]
 
 
 @router.get("/logs")
@@ -48,6 +49,7 @@ def save_log_settings(data: LogSettingsIn):
         "keep_access_logs": data.keep_access_logs,
         "max_network": max(1000, data.max_network),
         "max_container": max(1000, data.max_container),
+        "max_audit": max(1000, data.max_audit),
     }
     write_config(cfg)
     return get_log_settings()

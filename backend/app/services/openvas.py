@@ -128,6 +128,21 @@ class OpenVasService:
         except Exception as e:
             return {"connected": False, "error": str(e)}
 
+    def get_feeds(self) -> list[dict]:
+        """Feed versions and whether gvmd is still loading/syncing each one."""
+        with self._session() as sock:
+            resp = _cmd(sock, "<get_feeds/>")
+        return [
+            {
+                "type":    f.findtext("type", ""),
+                "name":    f.findtext("name", ""),
+                "version": f.findtext("version", ""),
+                "syncing": f.find("currently_syncing") is not None,
+                "error":   f.findtext("sync_not_available/error") or None,
+            }
+            for f in resp.findall("feed")
+        ]
+
     # ── Scan configurations ───────────────────────────────────────────────────
 
     def get_scan_configs(self) -> list[dict]:

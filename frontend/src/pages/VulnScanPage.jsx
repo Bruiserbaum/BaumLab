@@ -201,25 +201,29 @@ export default function VulnScanPage() {
       </p>
 
       {/* ── Health banner ── */}
-      {health && (
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 10,
-          padding: '10px 14px', marginBottom: 20,
-          background: health.connected ? 'rgba(35,134,54,0.1)' : 'rgba(218,54,51,0.1)',
-          border: `1px solid ${health.connected ? '#238636' : '#da3633'}`,
-          borderRadius: 6, fontSize: 13,
-        }}>
+      {health && (() => {
+        // Bundled container still starting / importing feeds: amber, not an error
+        const busy = !health.connected && ['starting', 'loading', 'unknown'].includes(health.state)
+        const [fg, border, bg] = health.connected ? ['#3fb950', '#238636', 'rgba(35,134,54,0.1)']
+          : busy ? ['#d29922', '#9e6a03', 'rgba(210,153,34,0.1)'] : ['#f85149', '#da3633', 'rgba(218,54,51,0.1)']
+        return (
           <div style={{
-            width: 9, height: 9, borderRadius: '50%', flexShrink: 0,
-            background: health.connected ? '#3fb950' : '#f85149',
-          }} />
-          {health.connected
-            ? <span>OpenVAS connected — GVM <strong>{health.version}</strong></span>
-            : <span style={{ color: '#f85149' }}>OpenVAS not reachable — {health.error}. Configure in <strong>Settings → OpenVAS</strong>.</span>
-          }
-          <button className="secondary" style={{ marginLeft: 'auto' }} onClick={load}>Refresh</button>
-        </div>
-      )}
+            display: 'flex', alignItems: 'center', gap: 10,
+            padding: '10px 14px', marginBottom: 20,
+            background: bg, border: `1px solid ${border}`,
+            borderRadius: 6, fontSize: 13,
+          }}>
+            <div style={{ width: 9, height: 9, borderRadius: '50%', flexShrink: 0, background: fg }} />
+            {health.connected
+              ? <span>OpenVAS connected — GVM <strong>{health.version}</strong>{health.state === 'updating' && ' · updating feeds'}</span>
+              : busy
+                ? <span style={{ color: fg }}>OpenVAS is getting ready — {health.error?.replace(/\.?$/, '.')} Progress is shown in <strong>Settings → OpenVAS</strong>.</span>
+                : <span style={{ color: fg }}>OpenVAS not reachable — {health.error?.replace(/\.?$/, '.')} See <strong>Settings → OpenVAS</strong>.</span>
+            }
+            <button className="secondary" style={{ marginLeft: 'auto' }} onClick={load}>Refresh</button>
+          </div>
+        )
+      })()}
 
       {/* ── New scan form ── */}
       {health?.connected && (

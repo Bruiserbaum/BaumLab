@@ -12,6 +12,7 @@ const SEV_COLORS = {
 }
 
 const REFRESH_MS = 10_000
+const SOURCE_LABELS = { network: 'Network', container: 'Containers', audit: 'Activity' }
 
 export default function SyslogPage() {
   const api = useApi()
@@ -21,7 +22,7 @@ export default function SyslogPage() {
   const [host, setHost] = useState('')
   const [search, setSearch] = useState('')
   const [params] = useSearchParams()
-  const [source, setSource] = useState(params.get('source') || '')   // '' | network | container
+  const [source, setSource] = useState(params.get('source') || '')   // '' | network | container | audit
   const [loading, setLoading] = useState(false)
   const [selected, setSelected] = useState(null)
   const intervalRef = useRef(null)
@@ -34,7 +35,7 @@ export default function SyslogPage() {
       if (search) params.set('search', search)
       if (source) params.set('source', source)
       const [msgR, statR] = await Promise.all([
-        api(`${API}/api/syslog?${params}`),
+        api(`${API}/api/syslog/?${params}`),
         api(`${API}/api/syslog/stats`),
       ])
       if (msgR.ok) setMessages(await msgR.json())
@@ -52,7 +53,7 @@ export default function SyslogPage() {
 
   async function clearAll() {
     if (!confirm('Delete all syslog messages?')) return
-    await api(`${API}/api/syslog`, { method: 'DELETE' })
+    await api(`${API}/api/syslog/`, { method: 'DELETE' })
     setMessages([])
     setStats(null)
   }
@@ -67,7 +68,7 @@ export default function SyslogPage() {
           </span>
           {stats.by_source && Object.entries(stats.by_source).map(([src, n]) => (
             <span key={src} style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-              {src === 'container' ? 'Containers' : 'Network'}: <b style={{ color: 'var(--text)' }}>{n.toLocaleString()}</b>
+              {SOURCE_LABELS[src] || src}: <b style={{ color: 'var(--text)' }}>{n.toLocaleString()}</b>
             </span>
           ))}
           {Object.entries(stats.by_severity).map(([sev, n]) => (
@@ -85,6 +86,7 @@ export default function SyslogPage() {
           <option value="">All sources</option>
           <option value="network">Network devices (UDP)</option>
           <option value="container">BaumLab containers</option>
+          <option value="audit">BaumLab activity</option>
         </select>
         <select
           value={severityMax}
@@ -157,7 +159,7 @@ export default function SyslogPage() {
             {messages.length === 0 && !loading && (
               <tr>
                 <td colSpan={6} style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)' }}>
-                  No syslog messages. Configure your devices to send syslog to this host on UDP port 514.
+                  No messages yet. Network devices can send syslog to this host on UDP port 514; BaumLab's own container logs and activity appear here automatically.
                 </td>
               </tr>
             )}

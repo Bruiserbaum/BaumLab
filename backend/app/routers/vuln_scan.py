@@ -10,7 +10,8 @@ from ..database import get_session
 from ..models.vuln_schedule import ScheduledVulnScan
 from ..services.auth import get_current_user, require_admin
 from ..services.openvas import OpenVasService
-from ..services.config_service import read_config, decrypt
+from ..services import openvas_setup
+from ..services.config_service import read_config
 
 router = APIRouter(
     prefix="/api/vuln-scan",
@@ -21,15 +22,11 @@ router = APIRouter(
 
 def _get_service() -> OpenVasService:
     cfg = read_config().get("openvas", {})
-    if not cfg.get("username"):
-        raise HTTPException(status_code=503, detail="OpenVAS not configured")
-    return OpenVasService(
-        username=cfg.get("username", "admin"),
-        password=decrypt(cfg.get("password", "")),
-        socket_path=cfg.get("socket_path", "/var/run/gvmd/gvmd.sock"),
-        host=cfg.get("host") or None,
-        port=int(cfg.get("port", 9390)),
-    )
+    svc = openvas_setup.service(cfg)
+    if svc is None:
+        detail = ("OpenVAS is still being set up" if openvas_setup.mode(cfg) == "auto" else "OpenVAS not configured")
+        raise HTTPException(status_code=503, detail=detail)
+    return svc
 
 
 def _diagnose_container(host: str) -> Optional[str]:
@@ -62,7 +59,13 @@ def _diagnose_container(host: str) -> Optional[str]:
 
 
 @router.get("/health")
-def health():
+def health(refresh: bool = False, user=Depends(get_current_user)):
+    cfg = read_config().get("openvas", {})
+    if openvas_setup.mode(cfg) == "auto":
+        # Bundled container: BaumLab sets it up itself and reports how far it has got
+        st = openvas_setup.check(force=refresh and user.is_admin)
+        usable = st["state"] in openvas_setup.USABLE
+        return {**st, "connected": usable, "error": None if usable else st["message"]}
     try:
         svc = _get_service()
     except HTTPException:
@@ -78,10 +81,7 @@ def health():
     elif svc.host and "refused" in err and os.path.exists(svc.socket_path):
         # The bundled immauss container only serves GMP on its Unix socket
         result["error"] = (f"Nothing is listening on {svc.host}:{svc.port}. The bundled OpenVAS container only "
-                           f"accepts the Unix socket — clear the Host field and keep Socket Path {svc.socket_path}.")
-    elif not svc.host and ("no such file" in err or "refused" in err):
-        result["error"] = (f"gvmd hasn't opened {svc.socket_path} yet. It appears once the first feed import "
-                           f"finishes — watch for 'ready to accept GMP connections' in docker logs baumlab-openvas.")
+                           f"accepts the Unix socket — switch Settings → OpenVAS to the bundled container.")
     return result
 
 

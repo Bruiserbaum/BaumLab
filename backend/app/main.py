@@ -1,7 +1,7 @@
 import asyncio
 import os
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlmodel import Session, select
@@ -12,7 +12,7 @@ from .models.monitor import MonitorTarget, MonitorResult
 from .models.user import User
 from .models.vuln_schedule import ScheduledVulnScan
 from .services.monitor import run_check
-from .services.auth import hash_password
+from .services.auth import hash_password, username_from_token
 from .routers import devices, monitors, scan, unifi, auth, users, settings, external_scan, status, advanced_scan, vuln_scan, services
 from .routers import syslog as syslog_router, portainer as portainer_router, git_sync as git_sync_router
 from .routers import vault as vault_router, updates as updates_router, tools as tools_router, repos as repos_router
@@ -20,9 +20,9 @@ from .routers import backups as backups_router, alerts as alerts_router
 from .routers import certs as certs_router, dashboard as dashboard_router
 from .routers import icons as icons_router, launchpad as launchpad_router, terminal as terminal_router
 from .routers import system as system_router
-from .services import git_sync, updater, repo_tracker, backup_schedule, alerts, certs, integrity, log_collector
+from .services import git_sync, updater, repo_tracker, backup_schedule, alerts, certs, integrity, log_collector, openvas_setup
 from .services.syslog_listener import trim as trim_syslog
-from .services.config_service import read_config, decrypt
+from .services.config_service import read_config
 from .services.syslog_listener import start_syslog_listener
 from .routers.portainer import _poll_all
 from .routers.scan import _upsert_devices
@@ -97,17 +97,9 @@ async def _run_monitor_checks():
 
 async def _run_scheduled_vuln_scans():
     """Run any vuln scans that are due based on their weekly/monthly frequency."""
-    from .services.openvas import OpenVasService
-    cfg = read_config().get("openvas", {})
-    if not cfg.get("username"):
-        return  # OpenVAS not configured
-    svc = OpenVasService(
-        username=cfg.get("username", "admin"),
-        password=decrypt(cfg.get("password", "")),
-        socket_path=cfg.get("socket_path", "/var/run/gvmd/gvmd.sock"),
-        host=cfg.get("host") or None,
-        port=int(cfg.get("port", 9390)),
-    )
+    svc = openvas_setup.service()
+    if svc is None:
+        return  # OpenVAS not configured (or still being set up)
     now = datetime.utcnow()
     with Session(engine) as session:
         schedules = session.exec(
@@ -164,6 +156,9 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(_run_monitor_checks, "interval", seconds=30, id="monitor_checks")
     # Check scheduled vuln scans every 6 hours
     scheduler.add_job(_run_scheduled_vuln_scans, "interval", hours=6, id="vuln_scan_scheduler")
+    # Bundled OpenVAS: generate its admin password, connect, and track its startup (sync → thread pool)
+    scheduler.add_job(openvas_setup.refresh, "interval", minutes=1, id="openvas_setup",
+                      next_run_time=datetime.now() + timedelta(seconds=20))
 
     # Auto-scan if configured
     sc = read_config().get("scan", {})
@@ -230,6 +225,21 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Calculators on the Tools page POST but change nothing — keep them out of the activity log
+_AUDIT_SKIP = ("/api/tools/",)
+
+
+@app.middleware("http")
+async def audit_changes(request: Request, call_next):
+    """Every change made through the API (anything but GET) → Syslog 'BaumLab activity', with who made it."""
+    response = await call_next(request)
+    path = request.url.path
+    if request.method not in ("GET", "HEAD", "OPTIONS") and path.startswith("/api/") and not path.startswith(_AUDIT_SKIP):
+        auth_header = request.headers.get("authorization", "")
+        who = username_from_token(auth_header[7:]) if auth_header.lower().startswith("bearer ") else None
+        log_collector.audit(who or "anonymous", request.method, path, response.status_code)
+    return response
 
 app.include_router(auth.router)
 app.include_router(users.router)

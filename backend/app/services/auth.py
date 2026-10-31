@@ -86,6 +86,25 @@ def get_current_user(
     return user
 
 
+_usernames: dict[int, str] = {}
+
+
+def username_from_token(token: str) -> Optional[str]:
+    """Who a bearer token belongs to, for the activity log. None if the token isn't valid."""
+    try:
+        user_id = int(jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])["sub"])
+    except (JWTError, KeyError, TypeError, ValueError):
+        return None
+    if user_id not in _usernames:
+        from ..database import engine
+        with Session(engine) as session:
+            user = session.get(User, user_id)
+        if user is None:
+            return None
+        _usernames[user_id] = user.username
+    return _usernames[user_id]
+
+
 def require_admin(current_user: User = Depends(get_current_user)) -> User:
     if not current_user.is_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")

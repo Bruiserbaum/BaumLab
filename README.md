@@ -54,7 +54,8 @@ A self-hosted home lab monitoring, mapping, and security dashboard. Discover eve
 - **Scan task management** — create, launch, monitor progress, view results, delete tasks
 - **CVSS-rated findings** — colour-coded severity badges (Critical / High / Medium / Low / Log)
 - **Scan configuration picker** — choose from all configs available in your OpenVAS instance
-- Connects via GMP Unix socket or TLS/TCP
+- **Sets itself up**: BaumLab generates the bundled scanner's admin password, sets it inside the container, stores it encrypted and connects over the private Unix socket — no ports or credentials to configure. Settings → OpenVAS shows live progress (Starting → Loading feeds → Ready) and the latest gvmd activity.
+- A remote GVM server can be used instead (TLS/TCP with your own credentials)
 
 ### UniFi Integration
 - **Clients** — connected WiFi and LAN clients with IP, MAC, VLAN, signal strength (dBm), TX/RX bytes
@@ -73,7 +74,7 @@ A self-hosted home lab monitoring, mapping, and security dashboard. Discover eve
 ### Settings
 - **UniFi** — URL, credentials, site, controller type, SSL verification; test connection button
 - **Scan** — default CIDR ranges, auto-scan toggle and interval
-- **OpenVAS** — socket path or host/port, credentials; test connection button
+- **OpenVAS** — bundled container (automatic, with a live status panel) or a remote GVM server (host/port, credentials, test button)
 - **Git Sync** — Forgejo / Gitea repo URL, token, branch, folder, auto-sync toggle; test connection button
 - **Repository Sources** — Git hosts listed on the Repositories page
 - **Updates** — check GitHub for new releases and apply them through Portainer (see [Updates](#updates))
@@ -117,7 +118,8 @@ A self-hosted home lab monitoring, mapping, and security dashboard. Discover eve
 - **Background consistency checks** every 15 minutes (and on demand, Admin → Health). These keep linked pieces in sync and repair what's safe automatically: SSH services ↔ Terminal hosts, links to deleted vault entries / monitors / services, Docker services ↔ containers, backup job service lists, missing icons, and backup schedules that dropped out of the scheduler.
 - **Reports what needs a decision**, with one alert per problem: a vanished container, a Terminal host without a login, an unreachable OpenVAS, stale Portainer data, failing Git sync, a locked vault, a missing Docker socket.
 - **Restart clean-up**: backup runs and terminal sessions interrupted by a restart are closed out at start-up instead of showing "running" forever.
-- **BaumLab's own logs in Syslog**: container output (api, ui, OpenVAS, or any containers you pick) is collected through the Docker socket and filed under each container's name, with a severity guessed from the text. Container logs and network syslog have separate retention limits.
+- **BaumLab's own logs in Syslog**: container output (api, ui, OpenVAS, or any containers you pick) is collected through the Docker socket and filed under each container's name, with a severity guessed from the text. Resumes from the last saved line after a redeploy. Container logs and network syslog have separate retention limits.
+- **Activity log**: every change made through BaumLab (adding a Portainer connection, saving settings, starting a container, signing in…) is recorded in Syslog under *BaumLab activity*, with who did it and whether it worked.
 
 ### Alerts
 - **Channels**: ntfy, Discord, email (SMTP), generic JSON webhook (Gotify, Home Assistant, …), each with a minimum severity and a test button
@@ -164,7 +166,7 @@ cd BaumLab
 
 # Set required environment variables
 cp .env.example .env
-# Edit .env — set SECRET_KEY, ADMIN_PASSWORD, and OPENVAS_ADMIN_PASSWORD
+# Edit .env — set SECRET_KEY and ADMIN_PASSWORD
 
 # Copy and edit config
 cp config/config.yaml.example config/config.yaml
@@ -178,7 +180,7 @@ docker compose up -d
 | Dashboard | http://localhost:3100 |
 | API docs | http://localhost:8100/docs |
 
-> **First run:** OpenVAS takes 15–60 minutes to sync its vulnerability feed before scans can run.
+> **First run:** OpenVAS takes 15–60 minutes to sync its vulnerability feed before scans can run. Settings → OpenVAS shows the progress.
 
 ---
 
@@ -194,8 +196,8 @@ docker compose up -d
 | `TOKEN_EXPIRE_HOURS` | `8` | JWT token lifetime |
 | `API_PORT` | `8100` | API container port |
 | `UI_PORT` | `3100` | Frontend container port |
-| `OPENVAS_ADMIN_USERNAME` | `admin` | OpenVAS admin user |
-| `OPENVAS_ADMIN_PASSWORD` | `changeme` | **Change this.** OpenVAS admin password |
+| `OPENVAS_ADMIN_USERNAME` | `admin` | OpenVAS admin user (optional) |
+| `OPENVAS_ADMIN_PASSWORD` | `changeme` | Optional first-boot password only — BaumLab replaces it with a generated one |
 | `OIDC_ENABLED` | `false` | Set to `true` to enable Authentik SSO login |
 | `OIDC_ISSUER` | — | Authentik provider URL — `https://auth.yourdomain.com/application/o/<app-slug>/` |
 | `OIDC_CLIENT_ID` | — | OAuth2 client ID from Authentik |

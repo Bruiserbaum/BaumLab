@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { useAuth, useApi } from '../auth'
+import OpenVasStatus from '../components/OpenVasStatus'
 
 function useVersion() {
   const [version, setVersion] = useState('')
@@ -13,7 +14,7 @@ const MASK = '••••••••'
 
 const blankUnifi   = { url: '', username: '', password: '', api_key: '', site: 'default', verify_ssl: false, controller_type: 'classic' }
 const blankScan    = { default_cidr: '192.168.1.0/24', auto_scan: false, auto_scan_interval_minutes: 60 }
-const blankOpenVas = { socket_path: '/var/run/gvmd/gvmd.sock', host: '', port: 9390, username: 'admin', password: '' }
+const blankOpenVas = { mode: 'auto', socket_path: '/var/run/gvmd/gvmd.sock', host: '', port: 9390, username: 'admin', password: '' }
 const blankGitSync = { repo_url: '', branch: '', path: '', token: '', auto_sync: true }
 const blankUpdates = { repo: '', portainer_connection: '', stack_id: null }
 const blankRepoSource = { name: '', type: 'github', url: '', owner: '', token: '', orig_name: null }
@@ -32,6 +33,7 @@ export default function SettingsPage() {
   const [unifi, setUnifi]       = useState(blankUnifi)
   const [scan, setScan]         = useState(blankScan)
   const [openvas, setOpenVas]   = useState(blankOpenVas)
+  const [savedOvMode, setSavedOvMode] = useState('auto')
   const [saved, setSaved]       = useState(false)
   const [error, setError]       = useState('')
   const [loading, setLoading]   = useState(true)
@@ -56,7 +58,7 @@ export default function SettingsPage() {
     api('/api/settings/').then(r => r.json()).then(data => {
       if (data.unifi)   setUnifi({ ...blankUnifi, ...data.unifi })
       if (data.scan)    setScan({ ...blankScan, ...data.scan })
-      if (data.openvas) setOpenVas({ ...blankOpenVas, ...data.openvas })
+      if (data.openvas) { setOpenVas({ ...blankOpenVas, ...data.openvas }); setSavedOvMode(data.openvas.mode) }
       if (data.git_sync) setGitSync({ ...blankGitSync, ...data.git_sync })
       setRepoSources(withOrigName(data.repo_sources))
       if (data.updates) {
@@ -144,7 +146,7 @@ export default function SettingsPage() {
     const fresh = await (await api('/api/settings/')).json()
     if (fresh.unifi)   setUnifi({ ...blankUnifi, ...fresh.unifi })
     if (fresh.scan)    setScan({ ...blankScan, ...fresh.scan })
-    if (fresh.openvas) setOpenVas({ ...blankOpenVas, ...fresh.openvas })
+    if (fresh.openvas) { setOpenVas({ ...blankOpenVas, ...fresh.openvas }); setSavedOvMode(fresh.openvas.mode) }
     if (fresh.git_sync) setGitSync({ ...blankGitSync, ...fresh.git_sync })
     setRepoSources(withOrigName(fresh.repo_sources))
   }
@@ -161,7 +163,7 @@ export default function SettingsPage() {
 
   async function testOpenVas() {
     setOvTesting(true); setOvTest(null)
-    const r = await api('/api/vuln-scan/health')
+    const r = await api('/api/vuln-scan/health?refresh=1')
     const data = await r.json().catch(() => ({}))
     setOvTest(data.connected
       ? { ok: true,  msg: `Connected — GVM ${data.version}` }
@@ -258,46 +260,72 @@ export default function SettingsPage() {
             Vulnerability scanner powered by{' '}
             <a href="https://www.greenbone.net/" target="_blank" rel="noreferrer"
               style={{ color: 'var(--accent)' }}>Greenbone Community Edition</a>.
-            Credentials stored encrypted. The bundled container is reached over its Unix socket; a remote GVM over TLS.
           </p>
 
-          <Field label="Unix Socket Path" hint="The bundled OpenVAS container: /var/run/gvmd/gvmd.sock">
-            <input value={openvas.socket_path}
-              onChange={e => setOpenVas(o => ({ ...o, socket_path: e.target.value }))}
-              placeholder="/var/run/gvmd/gvmd.sock" />
-          </Field>
-          <Field label="Host" hint="Leave blank for the bundled container (it only accepts the socket). Set only for a remote GVM with TLS GMP enabled">
-            <input value={openvas.host}
-              onChange={e => setOpenVas(o => ({ ...o, host: e.target.value }))}
-              placeholder="Leave blank to use socket" />
-          </Field>
-          <Field label="GMP Port" hint="Only used when Host is set">
-            <input type="number" value={openvas.port}
-              onChange={e => setOpenVas(o => ({ ...o, port: +e.target.value }))}
-              style={{ width: 100 }} />
-          </Field>
-          <Field label="Username">
-            <input value={openvas.username}
-              onChange={e => setOpenVas(o => ({ ...o, username: e.target.value }))}
-              autoComplete="off" />
-          </Field>
-          <Field label="Password" hint="Leave blank to keep existing">
-            <input type="password" value={openvas.password}
-              placeholder={openvas.password === MASK ? 'Saved — enter new to change' : ''}
-              onChange={e => setOpenVas(o => ({ ...o, password: e.target.value }))}
-              autoComplete="new-password" />
+          <Field label="Scanner">
+            <select value={openvas.mode} onChange={e => setOpenVas(o => ({ ...o, mode: e.target.value }))}>
+              <option value="auto">Bundled container — set up automatically</option>
+              <option value="manual">Remote GVM server — enter connection details</option>
+            </select>
           </Field>
 
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <button type="button" className="secondary" onClick={testOpenVas} disabled={ovTesting}>
-              {ovTesting ? 'Testing…' : 'Test Connection'}
-            </button>
-            {ovTest && (
-              <span style={{ fontSize: 12, color: ovTest.ok ? 'var(--green)' : 'var(--red)' }}>
-                {ovTest.ok ? '✓' : '✗'} {ovTest.msg}
-              </span>
-            )}
-          </div>
+          {openvas.mode !== savedOvMode && (
+            <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--yellow)' }}>
+              Click Save Settings to switch.
+            </p>
+          )}
+
+          {openvas.mode === 'auto' && savedOvMode === 'auto' && (
+            <>
+              <OpenVasStatus />
+              <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)' }}>
+                BaumLab generates the scanner's admin password, sets it inside the OpenVAS container, stores it
+                encrypted and connects over the private Unix socket — no stack variables or ports needed.
+              </p>
+            </>
+          )}
+
+          {openvas.mode === 'manual' && (
+            <>
+              <Field label="Host" hint="Your GVM server, with TLS GMP enabled — e.g. 192.168.1.50">
+                <input value={openvas.host}
+                  onChange={e => setOpenVas(o => ({ ...o, host: e.target.value }))}
+                  placeholder="Blank = connect over the Unix socket below" />
+              </Field>
+              <Field label="GMP Port" hint="Only used when Host is set">
+                <input type="number" value={openvas.port}
+                  onChange={e => setOpenVas(o => ({ ...o, port: +e.target.value }))}
+                  style={{ width: 100 }} />
+              </Field>
+              <Field label="Unix Socket Path" hint="Only used when Host is blank">
+                <input value={openvas.socket_path}
+                  onChange={e => setOpenVas(o => ({ ...o, socket_path: e.target.value }))}
+                  placeholder="/var/run/gvmd/gvmd.sock" />
+              </Field>
+              <Field label="Username">
+                <input value={openvas.username}
+                  onChange={e => setOpenVas(o => ({ ...o, username: e.target.value }))}
+                  autoComplete="off" />
+              </Field>
+              <Field label="Password" hint="Stored encrypted — leave blank to keep existing">
+                <input type="password" value={openvas.password}
+                  placeholder={openvas.password === MASK ? 'Saved — enter new to change' : ''}
+                  onChange={e => setOpenVas(o => ({ ...o, password: e.target.value }))}
+                  autoComplete="new-password" />
+              </Field>
+
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <button type="button" className="secondary" onClick={testOpenVas} disabled={ovTesting}>
+                  {ovTesting ? 'Testing…' : 'Test Connection'}
+                </button>
+                {ovTest && (
+                  <span style={{ fontSize: 12, color: ovTest.ok ? 'var(--green)' : 'var(--red)' }}>
+                    {ovTest.ok ? '✓' : '✗'} {ovTest.msg}
+                  </span>
+                )}
+              </div>
+            </>
+          )}
         </section>
 
         {/* ── Git Sync ───────────────────────────────────────────── */}

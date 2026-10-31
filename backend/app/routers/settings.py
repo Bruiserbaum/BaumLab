@@ -4,6 +4,7 @@ from typing import Optional
 
 from ..services.auth import require_admin
 from ..services.config_service import read_config, write_config, encrypt, decrypt
+from ..services.openvas_setup import mode as openvas_mode
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -27,6 +28,7 @@ class ScanIn(BaseModel):
 
 
 class OpenVasIn(BaseModel):
+    mode: str = "auto"       # auto = bundled container, set up by BaumLab | manual = remote GVM
     socket_path: str = "/var/run/gvmd/gvmd.sock"
     host: str = ""           # leave blank to use socket
     port: int = 9390
@@ -91,6 +93,7 @@ def get_settings():
             "auto_scan_interval_minutes": sc.get("auto_scan_interval_minutes", 60),
         },
         "openvas": {
+            "mode": openvas_mode(ov),
             "socket_path": ov.get("socket_path", "/var/run/gvmd/gvmd.sock"),
             "host": ov.get("host", ""),
             "port": ov.get("port", 9390),
@@ -152,6 +155,7 @@ def save_settings(payload: SettingsIn):
     if payload.openvas is not None:
         ov = cfg.get("openvas", {})
         o = payload.openvas
+        ov["mode"]        = o.mode if o.mode in ("auto", "manual") else "auto"
         ov["socket_path"] = o.socket_path
         ov["host"]        = o.host
         ov["port"]        = o.port

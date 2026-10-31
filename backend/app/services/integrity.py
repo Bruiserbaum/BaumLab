@@ -204,14 +204,15 @@ def _check_runtime(has_backups: bool) -> list[dict]:
         out.append({"key": "docker-socket", "check": "Backups", "severity": "error",
                     "text": "Backups are configured but the Docker socket isn't available to BaumLab", "link": "/backups"})
 
+    from . import openvas_setup
     ov = read_config().get("openvas", {})
-    if ov.get("username"):
+    if openvas_setup.mode(ov) == "auto" or ov.get("password"):
         try:
-            from ..routers.vuln_scan import health as openvas_health
-            result = openvas_health()
-            if not result.get("connected"):
+            st = openvas_setup.check()
+            # Starting up / importing feeds is expected after a deploy, not a problem
+            if st["state"] not in openvas_setup.USABLE | {"starting", "loading", "unknown"}:
                 out.append({"key": "openvas", "check": "OpenVAS", "severity": "warning",
-                            "text": f"OpenVAS unreachable: {result.get('error')}", "link": "/settings"})
+                            "text": f"OpenVAS: {st['message']}", "link": "/settings"})
         except Exception as e:
             out.append({"key": "openvas", "check": "OpenVAS", "severity": "warning",
                         "text": f"OpenVAS check failed: {e}", "link": "/settings"})

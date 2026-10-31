@@ -15,7 +15,7 @@ class SyslogMessage(SQLModel, table=True):
     tag: str = ""
     message: str = ""
     raw: str = ""
-    source: str = Field(default="network", index=True)   # network (UDP syslog) | container (collected Docker logs)
+    source: str = Field(default="network", index=True)   # network (UDP syslog) | container (collected Docker logs) | audit (changes made in BaumLab)
 
 
 SEVERITY_NAMES = {

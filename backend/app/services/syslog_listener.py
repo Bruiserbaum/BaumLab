@@ -20,13 +20,14 @@ from .config_service import read_config
 
 # Rows kept per source; trimmed by a scheduled job (see trim) instead of on every insert.
 # Separate limits stop chatty container logs from pushing out network device syslog.
-DEFAULT_LIMITS = {"network": 20_000, "container": 30_000}
+DEFAULT_LIMITS = {"network": 20_000, "container": 30_000, "audit": 10_000}
 
 
 def limits() -> dict:
     cfg = read_config().get("logs", {})
     return {"network": int(cfg.get("max_network", DEFAULT_LIMITS["network"])),
-            "container": int(cfg.get("max_container", DEFAULT_LIMITS["container"]))}
+            "container": int(cfg.get("max_container", DEFAULT_LIMITS["container"])),
+            "audit": int(cfg.get("max_audit", DEFAULT_LIMITS["audit"]))}
 
 
 def trim(engine) -> int:

@@ -16,7 +16,7 @@ def list_messages(
     severity_max: int = Query(7, ge=0, le=7, description="Max severity (0=Emerg, 7=Debug)"),
     host: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
-    source: Optional[str] = Query(None, description="network (UDP syslog) or container (BaumLab-collected Docker logs)"),
+    source: Optional[str] = Query(None, description="network (UDP syslog), container (BaumLab-collected Docker logs) or audit (changes made in BaumLab)"),
     limit: int = Query(200, ge=1, le=2000),
     offset: int = Query(0, ge=0),
     session: Session = Depends(get_session),

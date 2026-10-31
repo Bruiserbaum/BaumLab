@@ -80,7 +80,8 @@ services:
   # ---------------------------------------------------------------------------
   # NOTE: First startup takes 15-60 minutes to sync the NVT/SCAP/CERT feed data.
   # The gvmd Unix socket is shared with the api container via the gvmd-socket volume.
-  # Default admin credentials are set via OPENVAS_ADMIN_PASSWORD below.
+  # BaumLab sets the admin password itself (generated, stored encrypted) once gvmd is up —
+  # no credentials need to be configured. Settings → OpenVAS shows startup progress.
   # ---------------------------------------------------------------------------
   openvas:
     # Pinned on purpose: "latest" once jumped PostgreSQL 13 → 15 and the image couldn't migrate the
@@ -94,9 +95,10 @@ services:
       - gvmd-socket:/var/run/gvmd       # Unix socket shared with api container
     environment:
       - USERNAME=${OPENVAS_ADMIN_USERNAME:-admin}
+      # Only the first-boot password: BaumLab replaces it with a generated one
       - PASSWORD=${OPENVAS_ADMIN_PASSWORD:-changeme}
     # No published ports: BaumLab talks to gvmd over the shared Unix socket (gvmd-socket volume);
-    # this image does not listen for GMP on TCP 9390, so leave Host blank in Settings.
+    # this image does not listen for GMP on TCP 9390.
     # To open Greenbone's own web UI on your LAN, add:  ports: ["9392:9392"]
     networks:
       - baumlab
