@@ -144,12 +144,22 @@ def run_checks() -> list[dict]:
                     s.add(svc)
                     linked_keys.add((c.connection_name, c.endpoint_id, c.name))
                     fixed("Docker", f"Linked {svc.name} to container {c.name} ({c.endpoint_name})", "/services")
-        if snapshots:
-            newest = max(c.checked_at for c in snapshots)
-            if datetime.utcnow() - newest > timedelta(minutes=15):
-                issue("portainer-stale", "Docker", "warning",
-                      f"Portainer data hasn't refreshed since {newest:%Y-%m-%d %H:%M} UTC — check the connection on the Docker page",
-                      "/portainer")
+        from ..routers.portainer import poll_state
+        for conn in read_config().get("portainer", {}).get("connections", []):
+            if not conn.get("enabled", True):
+                continue
+            st = poll_state(conn.get("name", ""))
+            if not st.get("error"):
+                continue                         # fine, or not polled since start-up yet
+            last = st.get("last_success")
+            if last and datetime.utcnow() - last < timedelta(minutes=15):
+                if st["error"].startswith("some environments"):
+                    issue(f"portainer-partial:{conn.get('name')}", "Docker", "info",
+                          f"Portainer '{conn.get('name')}': {st['error']}", "/portainer")
+                continue                         # still fresh
+            since = f"since {last:%Y-%m-%d %H:%M} UTC" if last else "since BaumLab started"
+            issue(f"portainer-stale:{conn.get('name')}", "Docker", "warning",
+                  f"Portainer '{conn.get('name')}' hasn't refreshed {since}: {st['error']}", "/portainer")
 
         # ── Backups ────────────────────────────────────────────────────────────
         destinations = {d.id for d in s.exec(select(BackupDestination)).all()}

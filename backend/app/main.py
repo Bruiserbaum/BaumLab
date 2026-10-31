@@ -27,7 +27,7 @@ from .services.syslog_listener import start_syslog_listener
 from .routers.portainer import _poll_all
 from .routers.scan import _upsert_devices
 
-APP_VERSION = "1.11.0"  # bump this on every release (minor bump for every merged branch)
+APP_VERSION = "1.12.0"  # bump this on every release (minor bump for every merged branch)
 
 scheduler = AsyncIOScheduler()
 
@@ -226,8 +226,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Calculators on the Tools page POST but change nothing — keep them out of the activity log
-_AUDIT_SKIP = ("/api/tools/",)
+# Calculators on the Tools page POST but change nothing, and the terminal's HTTP fallback posts every
+# keystroke — keep them out of the activity log (opening a terminal session is still logged)
+_AUDIT_SKIP = ("/api/tools/", "/api/terminal/relay/")
 
 
 @app.middleware("http")

@@ -19,16 +19,26 @@ async function call(api, url, options = {}) {
   const isJson = typeof options.body === 'string'
   const r = await api(url, isJson ? { ...options, headers: { 'Content-Type': 'application/json' } } : options)
   const data = await r.json().catch(() => ({}))
-  if (!r.ok) throw new Error(typeof data.detail === 'string' ? data.detail : `HTTP ${r.status}`)
+  if (!r.ok) {
+    const detail = data.detail
+    const err = new Error(typeof detail === 'string' ? detail : detail?.message || `HTTP ${r.status}`)
+    err.kind = detail?.kind
+    throw err
+  }
   return data
 }
 
-/** One tab: an xterm.js terminal wired to /api/terminal/ws. Stays mounted while hidden to keep scrollback. */
+// Once a proxy has blocked the WebSocket, go straight to the HTTP fallback (per browser, best effort)
+const TRANSPORT_KEY = 'baumlab.terminal.http'
+const preferHttp = () => { try { return localStorage.getItem(TRANSPORT_KEY) === '1' } catch { return false } }
+const rememberHttp = () => { try { localStorage.setItem(TRANSPORT_KEY, '1') } catch { /* private mode */ } }
+
+/** One tab: an xterm.js terminal over /api/terminal/ws, or the HTTP relay when a proxy blocks WebSockets. Stays mounted while hidden to keep scrollback. */
 function TerminalTab({ api, tab, active, onStatus, onHostKeyReset }) {
   const boxRef = useRef(null)
   const termRef = useRef(null)
   const fitRef = useRef(null)
-  const wsRef = useRef(null)
+  const transportRef = useRef(null)      // { send, resize, close } — WebSocket or the HTTP fallback
   const [state, setState] = useState({ status: 'connecting', message: '', hostkey: false })
 
   function setStatus(next) {
@@ -38,8 +48,10 @@ function TerminalTab({ api, tab, active, onStatus, onHostKeyReset }) {
 
   async function connect() {
     const term = termRef.current
+    transportRef.current?.close()
     setStatus({ status: 'connecting', message: '', hostkey: false })
     term.writeln(`\x1b[90mConnecting to ${tab.name}…\x1b[0m`)
+    if (preferHttp()) { connectHttp(); return }
     let ticket
     try {
       ticket = (await call(api, `${API}/ticket`, { method: 'POST', body: JSON.stringify({ host_id: tab.hostId }) })).ticket
@@ -51,8 +63,12 @@ function TerminalTab({ api, tab, active, onStatus, onHostKeyReset }) {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws'
     const ws = new WebSocket(`${proto}://${location.host}${API}/ws/${tab.hostId}?ticket=${encodeURIComponent(ticket)}&cols=${term.cols}&rows=${term.rows}`)
     ws.binaryType = 'arraybuffer'
-    wsRef.current = ws
-    let opened = false
+    let opened = false, closing = false
+    transportRef.current = {
+      send: data => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'input', data })) },
+      resize: (cols, rows) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'resize', cols, rows })) },
+      close: () => { closing = true; ws.close() },
+    }
     ws.onopen = () => { opened = true }
     ws.onmessage = ev => {
       if (typeof ev.data !== 'string') { term.write(new Uint8Array(ev.data)); return }
@@ -68,22 +84,88 @@ function TerminalTab({ api, tab, active, onStatus, onHostKeyReset }) {
         setStatus({ status: 'closed', message: msg.reason })
       }
     }
-    ws.onclose = () => setState(s => {
+    ws.onclose = () => {
+      if (closing) return
       if (!opened) {
-        // The upgrade never completed — something between the browser and BaumLab dropped it
-        const why = 'The browser could not open a WebSocket to BaumLab. If it sits behind a reverse proxy, that proxy ' +
-          'must pass WebSocket upgrades (Nginx Proxy Manager with a custom "location /" block: see README → Terminal).'
-        term.writeln(`\r\n\x1b[31m${why}\x1b[0m`)
-        onStatus(tab.id, 'closed')
-        return { ...s, status: 'error', message: 'WebSocket blocked' }
+        // The upgrade never completed — a proxy in between dropped it. Plain HTTP gets through anything.
+        term.writeln('\x1b[90mWebSocket blocked on the way to BaumLab — using HTTP streaming instead.\x1b[0m')
+        rememberHttp()
+        connectHttp()
+        return
       }
-      if (s.status === 'connecting' || s.status === 'connected') {
-        term.writeln('\r\n\x1b[90m[connection lost]\x1b[0m')
-        onStatus(tab.id, 'closed')
-        return { ...s, status: 'closed', message: 'connection lost' }
+      setState(s => {
+        if (s.status === 'connecting' || s.status === 'connected') {
+          term.writeln('\r\n\x1b[90m[connection lost]\x1b[0m')
+          onStatus(tab.id, 'closed')
+          return { ...s, status: 'closed', message: 'connection lost' }
+        }
+        return s
+      })
+    }
+  }
+
+  /** Fallback transport: output streamed on one HTTP response, keystrokes posted in order. */
+  async function connectHttp() {
+    const term = termRef.current
+    let id
+    try {
+      id = (await call(api, `${API}/relay`, { method: 'POST',
+        body: JSON.stringify({ host_id: tab.hostId, cols: term.cols, rows: term.rows }) })).id
+    } catch (e) {
+      term.writeln(`\r\n\x1b[31m${e.message}\x1b[0m`)
+      setStatus({ status: 'error', message: e.message, hostkey: e.kind === 'hostkey' })
+      return
+    }
+    const ctrl = new AbortController()
+    let live = true, pending = '', sending = false
+    const post = (path, body) => api(`${API}/relay/${id}/${path}`, { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).catch(() => {})
+    async function flush() {                 // one request at a time keeps keystrokes in order
+      if (sending || !pending) return
+      sending = true
+      const data = pending
+      pending = ''
+      await post('input', { data })
+      sending = false
+      flush()
+    }
+    transportRef.current = {
+      send: data => { pending += data; flush() },
+      resize: (cols, rows) => post('resize', { cols, rows }),
+      close: () => { live = false; ctrl.abort(); api(`${API}/relay/${id}`, { method: 'DELETE' }).catch(() => {}) },
+    }
+    setStatus({ status: 'connected' })
+    term.focus()
+    try {
+      const r = await api(`${API}/relay/${id}/stream`, { signal: ctrl.signal })
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      const reader = r.body.getReader()
+      const decoder = new TextDecoder()
+      let buf = ''
+      while (true) {
+        const { value, done } = await reader.read()
+        if (done) break
+        buf += decoder.decode(value, { stream: true })
+        let nl
+        while ((nl = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, nl)
+          buf = buf.slice(nl + 1)
+          if (!line) continue
+          const msg = JSON.parse(line)
+          if (msg.t === 'o') term.write(Uint8Array.from(atob(msg.d), c => c.charCodeAt(0)))
+          else if (msg.t === 'closed') {
+            live = false
+            term.writeln(`\r\n\x1b[90m[session closed: ${msg.reason}]\x1b[0m`)
+            setStatus({ status: 'closed', message: msg.reason })
+          }
+        }
       }
-      return s
-    })
+    } catch { /* aborted, or the network dropped — handled below */ }
+    if (live) {
+      live = false
+      term.writeln('\r\n\x1b[90m[connection lost]\x1b[0m')
+      setStatus({ status: 'closed', message: 'connection lost' })
+    }
   }
 
   useEffect(() => {
@@ -96,18 +178,14 @@ function TerminalTab({ api, tab, active, onStatus, onHostKeyReset }) {
     fit.fit()
     termRef.current = term
     fitRef.current = fit
-    const input = term.onData(data => {
-      if (wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.send(JSON.stringify({ type: 'input', data }))
-    })
-    const resize = term.onResize(({ cols, rows }) => {
-      if (wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.send(JSON.stringify({ type: 'resize', cols, rows }))
-    })
+    const input = term.onData(data => transportRef.current?.send(data))
+    const resize = term.onResize(({ cols, rows }) => transportRef.current?.resize(cols, rows))
     const observer = new ResizeObserver(() => { if (boxRef.current?.offsetParent) fit.fit() })
     observer.observe(boxRef.current)
     connect()
     return () => {
       observer.disconnect(); input.dispose(); resize.dispose()
-      wsRef.current?.close()
+      transportRef.current?.close()
       term.dispose()
     }
   }, [])

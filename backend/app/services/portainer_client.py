@@ -7,6 +7,7 @@ and upserts ContainerSnapshot rows into the database.
 import httpx
 import json
 from datetime import datetime
+from typing import Optional
 from urllib.parse import urlparse
 from sqlmodel import Session, delete
 
@@ -26,9 +27,10 @@ def _published_ports(ports: list[dict]) -> str:
     return json.dumps([{"public": pub, "private": priv, "proto": proto} for pub, priv, proto in sorted(seen)])
 
 
-async def fetch_containers(url: str, api_key: str) -> list[dict]:
+async def fetch_containers(url: str, api_key: str, errors: Optional[list] = None) -> list[dict]:
     """
-    Fetch all containers from all endpoints in a Portainer instance.
+    Fetch all containers from all endpoints in a Portainer instance. Environments that fail are
+    skipped, with the reason appended to `errors` (when given) so callers can report it.
     Returns a list of dicts with keys:
       endpoint_id, endpoint_name, container_id, name, image, state, status_text, host, ports
     """
@@ -37,7 +39,7 @@ async def fetch_containers(url: str, api_key: str) -> list[dict]:
     if api_key:
         headers["X-API-Key"] = api_key
 
-    async with httpx.AsyncClient(timeout=10.0, verify=False, headers=headers) as client:
+    async with httpx.AsyncClient(timeout=30.0, verify=False, headers=headers) as client:
         ep_resp = await client.get(f"{base}/api/endpoints")
         ep_resp.raise_for_status()
         endpoints = ep_resp.json()
@@ -70,8 +72,10 @@ async def fetch_containers(url: str, api_key: str) -> list[dict]:
                         "ports": _published_ports(c.get("Ports", [])),
                     })
             except Exception as e:
-                # Endpoint unreachable — skip it silently
+                # Environment unreachable — skip it, but say why
                 print(f"Portainer endpoint {ep_id} error: {e}")
+                if errors is not None:
+                    errors.append(f"{ep_name}: {str(e) or type(e).__name__}")
 
         return results
 

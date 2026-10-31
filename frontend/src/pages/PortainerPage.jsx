@@ -3,6 +3,8 @@ import { useApi, useAuth } from '../auth'
 import ContainerPanel, { containerKey } from '../components/ContainerPanel'
 
 const API = import.meta.env.VITE_API_URL ?? ''
+// Backend times are naive UTC
+const utc = v => new Date(/[zZ]|[+-]\d\d:\d\d$/.test(v) ? v : v + 'Z')
 const REFRESH_MS = 30_000
 
 const STATE_COLORS = {
@@ -135,8 +137,8 @@ export default function PortainerPage() {
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           {statuses.map(s => (
             <div key={s.name} style={{
-              background: 'var(--surface)', border: '1px solid var(--border)',
-              borderRadius: 6, padding: '10px 16px', minWidth: 160,
+              background: 'var(--surface)', border: `1px solid ${s.error ? 'var(--red)' : 'var(--border)'}`,
+              borderRadius: 6, padding: '10px 16px', minWidth: 160, maxWidth: 420,
             }}>
               <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>{s.name}</div>
               <div style={{ fontSize: 18, fontWeight: 700, color: s.unhealthy > 0 ? '#e87a30' : 'var(--green)' }}>
@@ -147,9 +149,14 @@ export default function PortainerPage() {
                   ? <span style={{ color: '#e87a30' }}>{s.unhealthy} unhealthy</span>
                   : 'all running'}
                 {s.checked_at && (
-                  <> · {new Date(s.checked_at).toLocaleTimeString()}</>
+                  <> · {utc(s.checked_at).toLocaleTimeString()}</>
                 )}
               </div>
+              {s.error && (
+                <div style={{ fontSize: 11, color: 'var(--red)', marginTop: 4 }}>
+                  ✗ Refresh failing{s.last_success ? ` since ${utc(s.last_success).toLocaleTimeString()}` : ''}: {s.error}
+                </div>
+              )}
             </div>
           ))}
         </div>

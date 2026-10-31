@@ -102,6 +102,7 @@ A self-hosted home lab monitoring, mapping, and security dashboard. Discover eve
 - **Hosts** can be picked from discovered devices and linked to services. Passwords and private keys are stored in the **vault**, decrypted only while connecting, and every use is audited.
 - **Host keys pinned on first connect**: if a host's key changes, BaumLab refuses to connect (before sending any credentials) until you confirm
 - Admin-only, locked with the vault; session log of who connected where and when; idle sessions close after an hour
+- **Works behind any proxy**: if a WebSocket can't get through, the terminal switches to HTTP streaming on its own (and remembers that for this browser). WebSockets are still a little snappier, so if you can:
 - Behind Nginx Proxy Manager, turn on **Websockets Support** for the BaumLab proxy host. If the host has its own `location / { … }` block in the Advanced tab (as the Authentik forward-auth setup does), that toggle no longer applies. Add these lines inside that block, next to `proxy_pass`:
   ```nginx
   proxy_http_version 1.1;

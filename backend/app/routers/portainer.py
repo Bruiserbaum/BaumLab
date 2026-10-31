@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlmodel import Session, select
+from sqlmodel import Session, select, delete as sql_delete
 from pydantic import BaseModel
 from typing import Optional
 import asyncio
+from datetime import datetime
 
 from ..database import get_session, engine
 from ..models.portainer import ContainerSnapshot
@@ -133,6 +134,7 @@ def connection_status(session: Session = Depends(get_session)):
         running   = sum(1 for c in all_c if c.state == "running")
         unhealthy = sum(1 for c in all_c if c.state in ("exited", "dead", "restarting"))
         checked_at = max((c.checked_at for c in all_c), default=None)
+        st = poll_state(name)
         result.append({
             "name": name,
             "url": conn.get("url", ""),
@@ -141,6 +143,9 @@ def connection_status(session: Session = Depends(get_session)):
             "running": running,
             "unhealthy": unhealthy,
             "checked_at": checked_at.isoformat() if checked_at else None,
+            "last_attempt": st["last_attempt"].isoformat() if st.get("last_attempt") else None,
+            "last_success": st["last_success"].isoformat() if st.get("last_success") else None,
+            "error": st.get("error"),
         })
     return result
 
@@ -152,21 +157,54 @@ async def trigger_poll():
     return {"status": "polled"}
 
 
+# Last poll per connection — what the Docker page, the dashboard and the health check report
+_poll_state: dict[str, dict] = {}
+
+
+def poll_state(name: str) -> dict:
+    return _poll_state.get(name, {})
+
+
+def _poll_error(e: Exception, url: str) -> str:
+    import httpx
+    if isinstance(e, httpx.HTTPStatusError) and e.response.status_code in (401, 403):
+        return f"Portainer rejected the API key (HTTP {e.response.status_code})"
+    if isinstance(e, httpx.TimeoutException):
+        return f"timed out reaching {url}"
+    if isinstance(e, httpx.ConnectError):
+        return f"can't reach {url} ({e})"
+    return str(e) or type(e).__name__
+
+
 async def _poll_all():
     """Poll all enabled Portainer connections and update snapshots."""
     connections = read_config().get("portainer", {}).get("connections", [])
-    for conn in connections:
-        if not conn.get("enabled", True):
-            continue
+    enabled = [c for c in connections if c.get("enabled", True)]
+    # Containers of removed / disabled connections would otherwise linger and look like data that stopped updating
+    keep = [c.get("name", "") for c in enabled]
+    with Session(engine) as s:
+        s.exec(sql_delete(ContainerSnapshot).where(ContainerSnapshot.connection_name.not_in(keep)))
+        s.commit()
+    for name in list(_poll_state):
+        if name not in keep:
+            _poll_state.pop(name)
+    for conn in enabled:
         name = conn.get("name", "unknown")
         url = conn.get("url", "")
-        api_key = decrypt(conn.get("api_key", ""))
+        state = _poll_state.setdefault(name, {})
+        state["last_attempt"] = datetime.utcnow()
+        errors: list[str] = []
         try:
-            containers = await fetch_containers(url, api_key)
+            containers = await fetch_containers(url, decrypt(conn.get("api_key", "")), errors)
+            if errors and not containers:
+                raise RuntimeError("every environment failed — " + "; ".join(errors))
             upsert_containers(engine, name, containers)
+            state.update(last_success=datetime.utcnow(), containers=len(containers),
+                         error=("some environments failed — " + "; ".join(errors)) if errors else None)
             print(f"Portainer '{name}': {len(containers)} containers updated")
         except Exception as e:
-            print(f"Portainer poll failed for '{name}': {e}")
+            state["error"] = _poll_error(e, url)
+            print(f"Portainer poll failed for '{name}': {state['error']}")
 
 
 # ── Container actions ──────────────────────────────────────────────────────────

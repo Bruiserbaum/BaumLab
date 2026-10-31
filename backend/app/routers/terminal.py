@@ -7,7 +7,8 @@ import json
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, WebSocket
+from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
@@ -17,7 +18,7 @@ from ..models.service import Service
 from ..models.terminal import SshHost, TerminalSession
 from ..models.user import User
 from ..models.vault import VaultAudit, VaultEntry
-from ..services import ssh, vault
+from ..services import ssh, terminal_relay, vault
 from ..services.auth import require_admin
 
 # Admin-only, and only while the vault's safety checks pass (logins live in the vault)
@@ -259,3 +260,78 @@ async def terminal_ws(websocket: WebSocket, host_id: int, ticket: str = "", cols
             await websocket.close()
         except Exception:
             pass
+
+
+# ── HTTP fallback (when a proxy blocks the WebSocket) ──────────────────────────
+
+class RelayIn(BaseModel):
+    host_id: int
+    cols: int = 120
+    rows: int = 32
+
+
+class RelayInputIn(BaseModel):
+    data: str
+
+
+class RelayResizeIn(BaseModel):
+    cols: int
+    rows: int
+
+
+def _relay(relay_id: str, user: User) -> "terminal_relay.Relay":
+    relay = terminal_relay.get(relay_id, user.username)
+    if not relay:
+        raise HTTPException(status_code=404, detail="Session ended — reconnect")
+    return relay
+
+
+@router.post("/relay")
+async def open_relay(data: RelayIn, request: Request, user: User = Depends(require_admin)):
+    with Session(engine) as s:
+        host = _get(s, data.host_id)
+        audit = TerminalSession(host_id=host.id, host_name=host.name, actor=user.username,
+                                client_ip=request.headers.get("x-real-ip") or (request.client.host if request.client else None))
+        s.add(audit)
+        s.commit()
+        audit_id = audit.id
+    try:
+        relay = await terminal_relay.open_relay(data.host_id, user.username, data.cols, data.rows, audit_id, _end_session)
+    except ssh.HostKeyChanged as e:
+        _end_session(audit_id, "host key changed")
+        raise HTTPException(status_code=409, detail={"message": str(e), "kind": "hostkey"})
+    except ssh.SshError as e:
+        _end_session(audit_id, f"connect failed: {e}")
+        raise HTTPException(status_code=502, detail=str(e))
+    except HTTPException as e:
+        _end_session(audit_id, str(e.detail))
+        raise
+    return {"id": relay.id, "host": relay.host_name}
+
+
+@router.get("/relay/{relay_id}/stream")
+async def relay_stream(relay_id: str, user: User = Depends(require_admin)):
+    relay = _relay(relay_id, user)
+    # X-Accel-Buffering: no — nginx (BaumLab's own and NPM's) passes each chunk straight through
+    return StreamingResponse(terminal_relay.stream(relay), media_type="application/x-ndjson",
+                             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+
+
+@router.post("/relay/{relay_id}/input")
+async def relay_input(relay_id: str, data: RelayInputIn, user: User = Depends(require_admin)):
+    terminal_relay.send_input(_relay(relay_id, user), data.data)
+    return {"ok": True}
+
+
+@router.post("/relay/{relay_id}/resize")
+async def relay_resize(relay_id: str, data: RelayResizeIn, user: User = Depends(require_admin)):
+    terminal_relay.resize(_relay(relay_id, user), data.cols, data.rows)
+    return {"ok": True}
+
+
+@router.delete("/relay/{relay_id}")
+async def relay_close(relay_id: str, user: User = Depends(require_admin)):
+    relay = terminal_relay.get(relay_id, user.username)
+    if relay:
+        terminal_relay.close(relay, "browser closed", _end_session)
+    return {"ok": True}
