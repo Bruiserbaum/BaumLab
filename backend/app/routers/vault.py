@@ -89,6 +89,10 @@ def delete_entry(entry_id: int, user: User = Depends(require_admin), session: Se
     if users:
         raise HTTPException(status_code=409, detail=f"Backup destination {', '.join(users)} uses this entry — "
                                                     "point it at another credential first")
+    from ..services import mail_relay
+    if mail_relay.settings()["upstream"].get("credential_id") == entry_id:
+        raise HTTPException(status_code=409, detail="The mail relay logs in to its upstream server with this entry — "
+                                                    "pick another credential on the Mail relay page first")
     _audit(session, entry, user, "delete")
     session.delete(entry)
     session.commit()

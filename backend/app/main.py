@@ -19,15 +19,16 @@ from .routers import vault as vault_router, updates as updates_router, tools as 
 from .routers import backups as backups_router, alerts as alerts_router, recovery_kits as recovery_kits_router
 from .routers import certs as certs_router, dashboard as dashboard_router
 from .routers import icons as icons_router, launchpad as launchpad_router, terminal as terminal_router
-from .routers import system as system_router
+from .routers import system as system_router, mail_relay as mail_relay_router
 from .services import git_sync, updater, repo_tracker, backup_schedule, alerts, certs, integrity, log_collector, openvas_setup
+from .services import mail_relay
 from .services.syslog_listener import trim as trim_syslog
 from .services.config_service import read_config
 from .services.syslog_listener import start_syslog_listener
 from .routers.portainer import _poll_all
 from .routers.scan import _upsert_devices
 
-APP_VERSION = "1.14.0"  # bump this on every release (minor bump for every merged branch)
+APP_VERSION = "1.15.0"  # bump this on every release (minor bump for every merged branch)
 
 scheduler = AsyncIOScheduler()
 
@@ -209,10 +210,15 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(trim_syslog, "interval", minutes=5, id="syslog_trim", args=[engine])
     # BaumLab's own container logs (OpenVAS, ui, api) → Syslog
     log_collector.start()
+    # Mail relay for LAN devices: SMTP listener (own thread), queue delivery, cleanup
+    mail_relay.start()
+    scheduler.add_job(mail_relay.deliver_due, "interval", seconds=30, id="mail_relay_deliver")
+    scheduler.add_job(mail_relay.trim, "interval", hours=1, id="mail_relay_trim")
 
     scheduler.start()
     yield
     scheduler.shutdown()
+    mail_relay.stop()
     if syslog_transport:
         syslog_transport.close()
 
@@ -272,6 +278,7 @@ app.include_router(launchpad_router.public_router)
 app.include_router(terminal_router.router)
 app.include_router(terminal_router.ws_router)
 app.include_router(system_router.router)
+app.include_router(mail_relay_router.router)
 
 
 @app.get("/api/health")

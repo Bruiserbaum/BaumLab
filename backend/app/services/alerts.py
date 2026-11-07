@@ -28,6 +28,7 @@ EVENTS = {
     "cert_expiring":    "TLS certificate expires within 21 days (again at 7 days and on expiry)",
     "integrity":        "Background health check finds a problem it can't fix itself",
     "update_available": "BaumLab update available",
+    "mail_relay":       "Mail relay can't reach its upstream server, or gives up on a message",
 }
 CHANNEL_TYPES = ("ntfy", "discord", "email", "webhook")
 SECRET_FIELDS = {"token", "webhook_url", "password", "url"}

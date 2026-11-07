@@ -57,6 +57,13 @@ A self-hosted home lab monitoring, mapping, and security dashboard. Discover eve
 - **Sets itself up**: BaumLab generates the bundled scanner's admin password, sets it inside the container, stores it encrypted and connects over the private Unix socket — no ports or credentials to configure. Settings → OpenVAS shows live progress (Starting → Loading feeds → Ready) and the latest gvmd activity.
 - A remote GVM server can be used instead (TLS/TCP with your own credentials)
 
+### Mail Relay
+- **One address for every device's alert email**: NAS, Proxmox, UPS, printers, cameras, Uptime Kuma, Home Assistant and anything else that wants an SMTP server send to BaumLab (port `2525`, or set `SMTP_RELAY_PORT`, e.g. `25`), no encryption, and BaumLab passes the mail on through one account: Gmail, Microsoft 365, iCloud, Fastmail, SendGrid, Mailgun, Amazon SES, Brevo or your own server. Its password can come from the vault.
+- **Your choice of name and sender**: a relay name (point a local DNS record such as `smtp.home.lan` at BaumLab) and the address mail goes out as, either fixed (`alerts@example.com`) or keeping each device's name (`{local}@example.com`), with a display-name pattern and the device's own address as Reply-To. Optionally deliver everything to one inbox, whatever recipients a device gives.
+- **Only your network**: private ranges by default, editable; optional per-device logins.
+- **Nothing lost**: each message is stored before the device is told it's accepted, then retried with backoff for up to 2 days if the upstream is down. Alerts fire when the upstream becomes unreachable or a message is given up on.
+- **See what happened**: a log of every message (sender, recipients, the address it went out as, device, tries, the exact error) and every refused attempt with the reason, plus a test send, retry and `.eml` download. BaumLab's own alert email can use it too: host `127.0.0.1`, port `2525`, security None.
+
 ### UniFi Integration
 - **Clients** — connected WiFi and LAN clients with IP, MAC, VLAN, signal strength (dBm), TX/RX bytes
 - **Devices** — APs, switches, gateways with model, uptime, CPU, memory
