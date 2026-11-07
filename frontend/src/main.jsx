@@ -27,6 +27,7 @@ import UniFiPage from './pages/UniFiPage'
 import VulnScanPage from './pages/VulnScanPage'
 import SyslogPage from './pages/SyslogPage'
 import PortainerPage from './pages/PortainerPage'
+import MailRelayPage from './pages/MailRelayPage'
 import './styles.css'
 
 function App() {
@@ -84,6 +85,7 @@ function App() {
           <NavLink to="/monitors">Monitors</NavLink>
           <NavLink to="/portainer">Docker</NavLink>
           {isAdmin && <NavLink to="/backups">Backups</NavLink>}
+          {isAdmin && <NavLink to="/mail-relay">Mail relay</NavLink>}
 
           <div className="nav-section">Security</div>
           <NavLink to="/external-scan">External Scan</NavLink>
@@ -152,6 +154,7 @@ function App() {
             <Route path="/vuln-scan" element={<VulnScanPage />} />
             <Route path="/syslog" element={<SyslogPage />} />
             <Route path="/portainer" element={<PortainerPage />} />
+            <Route path="/mail-relay" element={<MailRelayPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Routes>
         </main>

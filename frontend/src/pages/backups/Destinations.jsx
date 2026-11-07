@@ -35,7 +35,7 @@ function BucketPicker({ api, config, setConfig, destId }) {
       const r = await apiJson(api, `${API}/destinations/b2-buckets`, {
         method: 'POST', body: JSON.stringify({
           account_id: config.account_id ?? '', application_key: config.application_key === MASK ? '' : config.application_key ?? '',
-          credential_id: config.credential_id || null, destination_id: destId ?? null,
+          credential_id: config.credential_id || null, destination_id: destId ?? null, bucket: config.bucket ?? '',
         }),
       })
       setState(r)

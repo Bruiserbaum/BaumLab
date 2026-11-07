@@ -10,6 +10,7 @@ services:
     ports:
       - "${API_PORT:-8100}:8000"
       - "${SYSLOG_PORT:-514}:514/udp"   # Syslog receiver (UDP)
+      - "${SMTP_RELAY_PORT:-2525}:2525"  # Mail relay — devices on your network send alert mail here
     volumes:
       # Portainer Git stacks: set these to absolute host paths — Portainer CE resolves
       # relative paths inside its own compose folder, not your clone
@@ -27,6 +28,7 @@ services:
     # Optional: ADMIN_USERNAME (default: admin), TOKEN_EXPIRE_HOURS (default: 8)
     #           API_PORT (default: 8100), UI_PORT (default: 3100)
     #           SYSLOG_PORT (default: 514) — UDP port to receive syslog from NAS/devices
+    #           SMTP_RELAY_PORT (default: 2525) — port devices send mail to (set 25 for devices that can't change it)
     environment:
       - DATABASE_URL=sqlite:///./data/baumlab.db
       - CONFIG_PATH=/app/config/config.yaml
@@ -37,6 +39,8 @@ services:
       # Time zone for backup cron schedules (e.g. America/New_York)
       - TZ=${TZ:-UTC}
       - BACKUP_TMP_DIR=/tmp/baumlab-backup
+      # Shown on the Mail relay page as the port devices should use
+      - SMTP_RELAY_PORT=${SMTP_RELAY_PORT:-2525}
       # Authentik forward auth (NPM header-based auto-login) — see BaumDocker/authentik/README
       - AUTHENTIK_HEADER_AUTH=${AUTHENTIK_HEADER_AUTH:-false}
       # Shared secret NPM sends as X-BaumLab-Proxy-Secret — required for the vault when header auth is on
