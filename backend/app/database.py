@@ -21,6 +21,21 @@ DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./data/baumlab.db")
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
 engine = create_engine(DATABASE_URL, connect_args=connect_args)
 
+if DATABASE_URL.startswith("sqlite"):
+    from sqlalchemy import event
+
+    @event.listens_for(engine, "connect")
+    def _sqlite_pragmas(dbapi_conn, _record):
+        # Many background writers share this file (syslog, container logs, mail relay,
+        # Portainer polls, retention trims). In the default rollback-journal mode a writer
+        # also blocks readers, and the driver gives up after 5s with "database is locked".
+        # WAL lets reads run alongside a write; busy_timeout makes writers queue instead of failing.
+        cur = dbapi_conn.cursor()
+        cur.execute("PRAGMA journal_mode=WAL")
+        cur.execute("PRAGMA synchronous=NORMAL")
+        cur.execute("PRAGMA busy_timeout=30000")
+        cur.close()
+
 
 def create_db_and_tables():
     SQLModel.metadata.create_all(engine)
